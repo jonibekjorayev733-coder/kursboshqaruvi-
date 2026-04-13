@@ -69,7 +69,7 @@ export default function TeacherAttendance() {
                 ].map(opt => (
                   <button key={opt.status} onClick={() => handleMark(s.id, opt.status)}
                     className={`p-2.5 rounded-lg transition-all ${mark?.status === opt.status ? opt.color + ' ring-2 ring-offset-1 ring-offset-background' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
-                    style={mark?.status === opt.status ? { ringColor: 'currentColor' } : {}}>
+                    >
                     {opt.icon}
                   </button>
                 ))}
