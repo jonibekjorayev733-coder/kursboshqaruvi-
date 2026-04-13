@@ -1,6 +1,3 @@
-import { create } from 'zustand' is not needed, we use React context;
-// Using a simple React context for role/theme state
-
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import type { UserRole } from '@/types';
 
@@ -34,10 +31,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   }, []);
 
-  return React.createElement(AppContext.Provider, {
-    value: { role, setRole, theme, toggleTheme, sidebarOpen, setSidebarOpen },
-    children,
-  });
+  return (
+    <AppContext.Provider value={{ role, setRole, theme, toggleTheme, sidebarOpen, setSidebarOpen }}>
+      {children}
+    </AppContext.Provider>
+  );
 }
 
 export function useAppContext() {
