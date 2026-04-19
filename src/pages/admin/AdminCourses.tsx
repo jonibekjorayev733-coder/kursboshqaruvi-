@@ -34,6 +34,19 @@ export default function AdminCourses() {
     api.getTeachers().then(setTeachers);
   }, []);
 
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ event?: string }>;
+      const eventName = customEvent.detail?.event || '';
+      if (eventName.startsWith('course.') || eventName === 'enrollment.created' || eventName.startsWith('teacher.')) {
+        fetchCourses();
+      }
+    };
+
+    window.addEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+    return () => window.removeEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+  }, []);
+
   const fetchCourses = async () => {
     try {
       const data = await api.getCourses();

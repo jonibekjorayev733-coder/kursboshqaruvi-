@@ -1005,7 +1005,7 @@ def update_payment(payment_id: int, payment: schemas.PaymentUpdate, db: Session 
     return db_payment
 
 @app.post("/payments/{payment_id}/send-sms")
-def send_payment_sms(payment_id: int, db: Session = Depends(get_db)):
+async def send_payment_sms(payment_id: int, db: Session = Depends(get_db)):
     """Send payment reminder notification for student panel"""
     payment = db.query(models.Payment).filter(models.Payment.id == payment_id).first()
     if not payment:
@@ -1022,18 +1022,43 @@ def send_payment_sms(payment_id: int, db: Session = Depends(get_db)):
     # Create DB notification shown in student panel
     print(f"🔔 Payment reminder sent to student {student.id} for course {payment.course_id}")
 
-    db.add(models.Notification(
+    sync_notification_id_sequence(db)
+    db_notification = models.Notification(
         user_id=student.id,
         title="💳 To'lov qiling",
         message=f"{course_name} kursi uchun to'lovni amalga oshiring. Miqdor: ${payment.amount}",
         type="payment_reminder",
-    ))
+    )
+    db.add(db_notification)
     db.commit()
+    db.refresh(db_notification)
+
+    await notification_manager.broadcast_to_user(
+        student.id,
+        notification_to_payload(db_notification),
+    )
+
+    emit_role_events(
+        "student",
+        "notification.created",
+        {"notification_id": db_notification.id, "user_id": student.id, "type": db_notification.type},
+        user_id=student.id,
+    )
+    emit_role_events(
+        "admin",
+        "payment.reminder_sent",
+        {"payment_id": payment.id, "student_id": student.id, "course_id": payment.course_id},
+    )
+    emit_role_events(
+        "teacher",
+        "payment.reminder_sent",
+        {"payment_id": payment.id, "student_id": student.id, "course_id": payment.course_id},
+    )
 
     return {"message": "Notification sent", "student_name": student.name}
 
 @app.post("/payments/send-bulk-notification")
-def send_bulk_payment_notification(payload: dict, db: Session = Depends(get_db)):
+async def send_bulk_payment_notification(payload: dict, db: Session = Depends(get_db)):
     """Send payment reminder notifications to multiple students
     
     payload: {
@@ -1049,6 +1074,7 @@ def send_bulk_payment_notification(payload: dict, db: Session = Depends(get_db))
     
     sent_count = 0
     failed_payments = []
+    created_notifications: List[models.Notification] = []
     
     for payment_id in payment_ids:
         try:
@@ -1077,18 +1103,35 @@ def send_bulk_payment_notification(payload: dict, db: Session = Depends(get_db))
                 message = f"{course_name} kursi uchun to'lov statusini tekshiring."
             
             # Create notification
-            db.add(models.Notification(
+            sync_notification_id_sequence(db)
+            db_notification = models.Notification(
                 user_id=student.id,
                 title="💳 To'lov xabarnomasla",
                 message=message,
                 type="payment_reminder",
-            ))
+            )
+            db.add(db_notification)
+            created_notifications.append(db_notification)
             
             sent_count += 1
         except Exception as e:
             failed_payments.append({"id": payment_id, "error": str(e)})
     
     db.commit()
+
+    for item in created_notifications:
+        db.refresh(item)
+        await notification_manager.broadcast_to_user(item.user_id, notification_to_payload(item))
+        emit_role_events(
+            "student",
+            "notification.created",
+            {"notification_id": item.id, "user_id": item.user_id, "type": item.type},
+            user_id=item.user_id,
+        )
+
+    if sent_count > 0:
+        emit_role_events("admin", "payment.bulk_reminder_sent", {"sent_count": sent_count})
+        emit_role_events("teacher", "payment.bulk_reminder_sent", {"sent_count": sent_count})
     
     return {
         "success": True,

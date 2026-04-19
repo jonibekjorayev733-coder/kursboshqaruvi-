@@ -27,6 +27,19 @@ export default function AdminStudents() {
     fetchStudents();
   }, []);
 
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ event?: string }>;
+      const eventName = customEvent.detail?.event || '';
+      if (eventName.startsWith('student.') || eventName === 'enrollment.created') {
+        fetchStudents();
+      }
+    };
+
+    window.addEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+    return () => window.removeEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+  }, []);
+
   const fetchStudents = async () => {
     try {
       const data = await api.getStudents();

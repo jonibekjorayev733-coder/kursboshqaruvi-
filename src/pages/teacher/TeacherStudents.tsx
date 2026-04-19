@@ -33,6 +33,22 @@ export default function TeacherStudents() {
       .finally(() => setLoading(false));
   }, [userId]);
 
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ event?: string }>;
+      const eventName = customEvent.detail?.event || '';
+      if (!selectedCourse?.id) {
+        return;
+      }
+      if (eventName === 'enrollment.created' || eventName.startsWith('student.') || eventName.startsWith('course.')) {
+        loadEnrollments(selectedCourse.id as number);
+      }
+    };
+
+    window.addEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+    return () => window.removeEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+  }, [selectedCourse?.id]);
+
   const loadEnrollments = async (courseId: number) => {
     try {
       const enrollments = await api.getEnrollments(courseId);

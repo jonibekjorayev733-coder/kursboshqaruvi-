@@ -71,7 +71,19 @@ export default function StudentDashboard() {
 
     fetchDashboardData();
     const interval = setInterval(fetchDashboardData, 30000);
-    return () => clearInterval(interval);
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ event?: string }>;
+      const eventName = customEvent.detail?.event || '';
+      if (eventName === 'enrollment.created' || eventName.startsWith('assignment.') || eventName.startsWith('payment.') || eventName === 'notification.created') {
+        fetchDashboardData();
+      }
+    };
+
+    window.addEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+    };
   }, [currentStudentId]);
 
   const avgScore = useMemo(() => {

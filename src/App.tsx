@@ -157,6 +157,24 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const handlePointerDown = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+
+      const button = target.closest('button') as HTMLButtonElement | null;
+      if (!button || button.disabled) return;
+
+      button.classList.add('btn-click-feedback');
+      window.setTimeout(() => {
+        button.classList.remove('btn-click-feedback');
+      }, 650);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
+  }, []);
+
   return (
     <AppProvider>
       <LanguageProvider>
