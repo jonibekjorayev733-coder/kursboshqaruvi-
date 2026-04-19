@@ -1,87 +1,306 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { PageHeader } from '@/components/shared/PageHeader';
-import { teachers, courses, students } from '@/data/mockData';
-import { UserPlus, ArrowRight } from 'lucide-react';
+import { api, Course, Student } from '@/services/api';
+import { Users, Plus, Trash2, CheckCircle, Circle, Search, Filter } from 'lucide-react';
 import { toast } from 'sonner';
 
-const currentTeacher = teachers[0];
-
 export default function TeacherStudents() {
-  const myCourses = useMemo(() => courses.filter(c => c.teacherId === currentTeacher.id), []);
-  const [selectedCourse, setSelectedCourse] = useState(myCourses[0]?.id || '');
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
+  const [enrolledStudentIds, setEnrolledStudentIds] = useState<Set<number>>(new Set());
+  const [selectedStudents, setSelectedStudents] = useState<Set<number>>(new Set());
+  const [selectAll, setSelectAll] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const userId = localStorage.getItem('user_id');
 
-  const assignedStudents = useMemo(
-    () => students.filter(s => myCourses.find(c => c.id === selectedCourse)?.studentIds.includes(s.id)),
-    [selectedCourse, myCourses]
-  );
+  useEffect(() => {
+    Promise.all([api.getCourses(), api.getStudents()])
+      .then(([c, s]) => {
+        const teacherCourses = c.filter((course: any) => course.teacher_id?.toString() === userId);
+        setCourses(teacherCourses);
+        setStudents(s);
+        if (teacherCourses.length > 0) {
+          setSelectedCourse(teacherCourses[0]);
+          loadEnrollments(teacherCourses[0].id as number);
+        }
+      })
+      .catch(e => {
+        console.error('Error loading data:', e);
+        toast.error('Ma\'lumot yuklashda xatolik');
+      })
+      .finally(() => setLoading(false));
+  }, [userId]);
 
-  const unassignedStudents = useMemo(
-    () => students.filter(s => !myCourses.find(c => c.id === selectedCourse)?.studentIds.includes(s.id)),
-    [selectedCourse, myCourses]
-  );
-
-  const handleAssign = (studentName: string) => {
-    toast.success(`${studentName} assigned to ${myCourses.find(c => c.id === selectedCourse)?.name}`);
+  const loadEnrollments = async (courseId: number) => {
+    try {
+      const enrollments = await api.getEnrollments(courseId);
+      const enrolledIds = new Set(enrollments.map((e: any) => e.student_id));
+      setEnrolledStudentIds(enrolledIds);
+    } catch (e) {
+      console.error('Error loading enrollments:', e);
+    }
   };
 
+  const assignedStudents = useMemo(() => {
+    return students.filter(s => enrolledStudentIds.has(s.id as number));
+  }, [enrolledStudentIds, students]);
+
+  const unassignedStudents = useMemo(() => {
+    return students
+      .filter(s => !enrolledStudentIds.has(s.id as number))
+      .filter(s => s.name?.toLowerCase().includes(searchTerm.toLowerCase()) || s.email?.toLowerCase().includes(searchTerm.toLowerCase()));
+  }, [enrolledStudentIds, students, searchTerm]);
+
+  const handleToggleStudent = (studentId: number) => {
+    const newSelected = new Set(selectedStudents);
+    if (newSelected.has(studentId)) {
+      newSelected.delete(studentId);
+    } else {
+      newSelected.add(studentId);
+    }
+    setSelectedStudents(newSelected);
+    setSelectAll(newSelected.size === unassignedStudents.length);
+  };
+
+  const handleToggleAll = () => {
+    if (selectAll) {
+      setSelectedStudents(new Set());
+      setSelectAll(false);
+    } else {
+      setSelectedStudents(new Set(unassignedStudents.map(s => s.id as number)));
+      setSelectAll(true);
+    }
+  };
+
+  const handleAddStudents = async () => {
+    if (!selectedCourse || selectedStudents.size === 0) {
+      toast.error('Kurs va o\'quvchi tanlang');
+      return;
+    }
+
+    try {
+      console.log('[LOG] Creating enrollments for', selectedStudents.size, 'students');
+      const courseId = selectedCourse.id as number;
+      
+      // Create enrollment for each selected student
+      for (const studentId of selectedStudents) {
+        try {
+          await api.createEnrollment(studentId, courseId);
+          console.log('[LOG] Student', studentId, 'enrolled successfully');
+        } catch (err) {
+          console.error('Error enrolling student', studentId, ':', err);
+        }
+      }
+      
+      // Reload enrollments
+      await loadEnrollments(courseId);
+      setSelectedStudents(new Set());
+      setSelectAll(false);
+      toast.success(`${selectedStudents.size} ta o'quvchi qo'shildi`);
+    } catch (e) {
+      console.error('Error adding students:', e);
+      toast.error('Xatolik yuz berdi');
+    }
+  };
+
+  const handleRemoveStudent = async (studentId: number) => {
+    if (!selectedCourse) return;
+
+    try {
+      console.log('[LOG] Deleting enrollment for student', studentId);
+      const courseId = selectedCourse.id as number;
+      await api.deleteEnrollment(studentId, courseId);
+      
+      // Reload enrollments
+      await loadEnrollments(courseId);
+      toast.success('O\'quvchi o\'chirildi');
+    } catch (e) {
+      console.error('Error removing student:', e);
+      toast.error('Xatolik yuz berdi');
+    }
+  };
+
+  if (loading) return <div className="text-center py-20">Yuklanmoqda...</div>;
+
   return (
-    <div>
-      <PageHeader title="Students" subtitle="Manage student assignments" />
-
-      <div className="mb-6">
-        <select value={selectedCourse} onChange={e => setSelectedCourse(e.target.value)}
-          className="bg-muted rounded-lg px-4 py-2.5 text-sm border-0 focus:ring-2 focus:ring-primary outline-none">
-          {myCourses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Unassigned */}
-        <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="glass rounded-xl p-6">
-          <h3 className="font-semibold mb-4">Available Students</h3>
-          <div className="space-y-2">
-            {unassignedStudents.map(s => (
-              <div key={s.id} className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors">
-                <div className="flex items-center gap-3">
-                  <img src={s.avatar} alt={s.name} className="w-8 h-8 rounded-full" />
-                  <div>
-                    <p className="text-sm font-medium">{s.name}</p>
-                    <p className="text-xs text-muted-foreground">{s.email}</p>
-                  </div>
-                </div>
-                <button onClick={() => handleAssign(s.name)} className="p-2 rounded-lg hover:bg-primary/10 text-primary transition-colors">
-                  <UserPlus className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-            {unassignedStudents.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">All students assigned</p>}
+    <motion.div initial="hidden" animate="visible" variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } }} className="space-y-6 sm:space-y-8">
+      
+      {/* PREMIUM HEADER */}
+      <motion.div variants={{ hidden: { opacity: 0, y: -20 }, visible: { opacity: 1, y: 0 } }} className="relative overflow-hidden rounded-2xl sm:rounded-3xl p-5 sm:p-8 md:p-12 bg-gradient-to-br from-purple-600 via-pink-500 to-red-500 shadow-2xl">
+        <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
+        <div className="relative z-10">
+          <div className="flex items-start sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-white mb-2 tracking-tight leading-tight">O'quvchilar Boshqaruvi</h1>
+              <p className="text-red-50 text-sm sm:text-base md:text-lg font-medium">Kursga o'quvchilar qo'shing va boshqaring</p>
+            </div>
+            <Users className="w-14 h-14 sm:w-20 sm:h-20 md:w-24 md:h-24 text-white opacity-80" />
           </div>
-        </motion.div>
-
-        {/* Arrow */}
-        <div className="hidden lg:flex items-center justify-center absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-          <ArrowRight className="w-6 h-6 text-muted-foreground" />
         </div>
+      </motion.div>
 
-        {/* Assigned */}
-        <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="glass rounded-xl p-6">
-          <h3 className="font-semibold mb-1">Enrolled Students</h3>
-          <p className="text-xs text-muted-foreground mb-4">{assignedStudents.length} students in this course</p>
-          <div className="space-y-2">
-            {assignedStudents.map(s => (
-              <div key={s.id} className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 border border-primary/10">
-                <img src={s.avatar} alt={s.name} className="w-8 h-8 rounded-full" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{s.name}</p>
-                  <p className="text-xs text-muted-foreground">{s.phone}</p>
-                </div>
-                <span className="text-xs bg-success/15 text-success px-2 py-1 rounded-full">Enrolled</span>
+      {/* COURSE SELECTOR */}
+      {courses.length > 0 && (
+        <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          {courses.map(course => (
+            <motion.button
+              key={course.id}
+              whileHover={{ y: -4 }}
+              onClick={() => {
+                setSelectedCourse(course);
+                loadEnrollments(course.id as number);
+              }}
+              className={`relative overflow-hidden rounded-2xl p-4 sm:p-6 transition-all duration-300 ${
+                selectedCourse?.id === course.id
+                  ? 'bg-gradient-to-br from-purple-600 to-pink-600 shadow-lg shadow-purple-500/50'
+                  : 'bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 hover:shadow-lg'
+              }`}
+            >
+              <div className="relative z-10">
+                <h3 className={`font-black text-base sm:text-lg mb-1.5 sm:mb-2 ${selectedCourse?.id === course.id ? 'text-white' : 'text-white'}`}>
+                  {course.name}
+                </h3>
+                <p className={`text-xs sm:text-sm ${selectedCourse?.id === course.id ? 'text-white/70' : 'text-slate-400'}`}>
+                  {selectedCourse?.id === course.id ? enrolledStudentIds.size : assignedStudents.filter(s => s.id).length} o'quvchi
+                </p>
               </div>
-            ))}
-          </div>
+            </motion.button>
+          ))}
         </motion.div>
-      </div>
-    </div>
+      )}
+
+      {/* MAIN CONTENT */}
+      {selectedCourse && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8">
+          {/* LEFT PANEL - UNASSIGNED STUDENTS */}
+          <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="relative overflow-hidden rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-8 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 shadow-2xl max-h-[72vh] lg:max-h-none h-fit lg:h-[600px] overflow-y-auto">
+            <div className="sticky top-0 z-10 mb-4 sm:mb-6 -mx-4 sm:-mx-6 lg:-mx-8 -mt-4 sm:-mt-6 lg:-mt-8 px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 pb-4 sm:pb-6 bg-gradient-to-b from-slate-800 via-slate-800 to-slate-800/80">
+              <h2 className="text-xl sm:text-2xl font-black text-white mb-3 sm:mb-4">Mavjud O'quvchilar</h2>
+              
+              {/* Search Bar */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="O'quvchi qidirish..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-700/50 border border-slate-600/50 text-white text-sm sm:text-base placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
+                />
+              </div>
+            </div>
+
+            {/* Select All */}
+            {unassignedStudents.length > 0 && (
+              <motion.button
+                onClick={handleToggleAll}
+                className="w-full mb-4 px-4 py-3.5 rounded-xl bg-slate-700/50 hover:bg-slate-600/50 text-white text-sm sm:text-base font-black transition-colors flex items-center justify-center gap-2"
+              >
+                {selectAll ? <CheckCircle className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+                Hammasini tanlash ({unassignedStudents.length})
+              </motion.button>
+            )}
+
+            {/* Student List */}
+            <div className="space-y-3">
+              {unassignedStudents.length === 0 ? (
+                <div className="text-center py-12">
+                  <Users className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                  <p className="text-slate-400 text-sm">Qo'shish uchun o'quvchi yo'q</p>
+                </div>
+              ) : (
+                unassignedStudents.map(student => (
+                  <motion.div
+                    key={student.id}
+                    whileHover={{ x: 4 }}
+                    onClick={() => handleToggleStudent(student.id as number)}
+                    className={`p-3.5 sm:p-4 rounded-xl cursor-pointer transition-all duration-300 ${
+                      selectedStudents.has(student.id as number)
+                        ? 'bg-gradient-to-r from-purple-600/50 to-pink-600/50 border border-purple-500/50'
+                        : 'bg-slate-700/30 hover:bg-slate-700/50 border border-slate-600/50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex-shrink-0">
+                        {selectedStudents.has(student.id as number) ? (
+                          <CheckCircle className="w-5 h-5 text-purple-400" />
+                        ) : (
+                          <Circle className="w-5 h-5 text-slate-500" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-base sm:text-lg font-semibold truncate">{student.name}</p>
+                        <p className="text-slate-400 text-xs sm:text-sm truncate">{student.email}</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))
+              )}
+            </div>
+
+            {/* Add Button */}
+            {unassignedStudents.length > 0 && (
+              <div className="sticky bottom-0 mt-4 pt-3 bg-gradient-to-t from-slate-900 via-slate-900/95 to-transparent">
+                <motion.button
+                  onClick={handleAddStudents}
+                  whileHover={{ y: -2 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="w-full px-6 py-3.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 text-white text-sm sm:text-base font-black hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  disabled={selectedStudents.size === 0}
+                >
+                  <Plus className="w-4 h-4" />
+                  Qo'shish ({selectedStudents.size})
+                </motion.button>
+              </div>
+            )}
+          </motion.div>
+
+          {/* RIGHT PANEL - ASSIGNED STUDENTS */}
+          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="relative overflow-hidden rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-8 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 shadow-2xl max-h-[72vh] lg:max-h-none h-fit lg:h-[600px] overflow-y-auto">
+            <div className="sticky top-0 z-10 mb-4 sm:mb-6 -mx-4 sm:-mx-6 lg:-mx-8 -mt-4 sm:-mt-6 lg:-mt-8 px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 pb-4 sm:pb-6 bg-gradient-to-b from-slate-800 via-slate-800 to-slate-800/80">
+              <h2 className="text-xl sm:text-2xl font-black text-white mb-1 break-words">{selectedCourse.name}</h2>
+              <p className="text-slate-400 text-sm">Qo'shilgan o'quvchilar: <span className="text-purple-400 font-black">{assignedStudents.length}</span></p>
+            </div>
+
+            {/* Assigned Student List */}
+            <div className="space-y-3">
+              {assignedStudents.length === 0 ? (
+                <div className="text-center py-12">
+                  <Users className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                  <p className="text-slate-400 text-sm">Hali o'quvchi qo'shilmagan</p>
+                </div>
+              ) : (
+                assignedStudents.map(student => (
+                  <motion.div
+                    key={student.id}
+                    whileHover={{ x: 4 }}
+                    className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-r from-slate-700/50 to-slate-600/50 border border-purple-500/30 hover:border-purple-500/50 transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <CheckCircle className="w-5 h-5 text-purple-400 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-base sm:text-lg font-semibold truncate">{student.name}</p>
+                        <p className="text-slate-400 text-xs sm:text-sm truncate">{student.email}</p>
+                      </div>
+                      <motion.button
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => handleRemoveStudent(student.id as number)}
+                        className="p-2.5 rounded-lg hover:bg-red-500/20 text-red-400 transition-colors flex-shrink-0"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </motion.button>
+                    </div>
+                  </motion.div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+    </motion.div>
   );
 }

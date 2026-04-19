@@ -1,32 +1,59 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { PageHeader } from '@/components/shared/PageHeader';
-import { teachers, courses, students } from '@/data/mockData';
+import { api, Course, Student } from '@/services/api';
 import { Users, Phone, User } from 'lucide-react';
-
-const currentTeacher = teachers[0];
+import { useLanguage } from '@/hooks/useTranslation';
 
 export default function TeacherGroups() {
-  const myCourses = useMemo(() => courses.filter(c => c.teacherId === currentTeacher.id), []);
-  const [selectedCourse, setSelectedCourse] = useState(myCourses[0]?.id || '');
+  const { t } = useLanguage();
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [enrolledStudentIds, setEnrolledStudentIds] = useState<Set<number>>(new Set());
 
-  const groupStudents = useMemo(
-    () => students.filter(s => myCourses.find(c => c.id === selectedCourse)?.studentIds.includes(s.id)),
-    [selectedCourse, myCourses]
-  );
+  useEffect(() => {
+    Promise.all([api.getCourses(), api.getStudents()]).then(([c, s]) => {
+      setCourses(c);
+      setStudents(s);
+      if (c.length > 0) {
+        setSelectedCourse(c[0].id?.toString() || '');
+        loadEnrollments(c[0].id as number);
+      }
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const loadEnrollments = async (courseId: number) => {
+    try {
+      const enrollments = await api.getEnrollments(courseId);
+      const enrolledIds = new Set(enrollments.map((e: any) => e.student_id));
+      setEnrolledStudentIds(enrolledIds);
+    } catch (e) {
+      console.error('Error loading enrollments:', e);
+    }
+  };
+
+  const groupStudents = useMemo(() => {
+    return students.filter(s => enrolledStudentIds.has(s.id as number));
+  }, [enrolledStudentIds, students]);
+
+  if (loading) return <div>{t('status.loading')}</div>;
 
   return (
     <div>
-      <PageHeader title="Groups" subtitle="View students by course group" />
+      <PageHeader title={t('admin.groups')} subtitle={t('admin.groupsSubtitle')} />
 
       <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-        {myCourses.map(c => (
-          <button key={c.id} onClick={() => setSelectedCourse(c.id)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
-              selectedCourse === c.id ? 'gradient-primary text-primary-foreground shadow-md' : 'glass hover:bg-muted/50'
-            }`}>
+        {courses.map(c => (
+          <button key={c.id} onClick={() => {
+            setSelectedCourse(c.id?.toString() || '');
+            loadEnrollments(c.id as number);
+          }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${selectedCourse === c.id?.toString() ? 'gradient-primary text-primary-foreground shadow-md' : 'glass hover:bg-muted/50'
+              }`}>
             {c.name}
-            <span className="ml-2 text-xs opacity-75">({c.studentIds.length})</span>
+            <span className="ml-2 text-xs opacity-75">({enrolledStudentIds.size})</span>
           </button>
         ))}
       </div>
@@ -36,21 +63,10 @@ export default function TeacherGroups() {
           <motion.div key={s.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
             className="glass rounded-xl p-5 hover:shadow-lg transition-shadow">
             <div className="flex items-center gap-3 mb-4">
-              <img src={s.avatar} alt={s.name} className="w-12 h-12 rounded-full" />
+              <img src={s.avatar || 'https://i.pravatar.cc/150'} alt={s.name} className="w-12 h-12 rounded-full" />
               <div>
                 <p className="font-semibold">{s.name}</p>
                 <p className="text-xs text-muted-foreground">{s.email}</p>
-              </div>
-            </div>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Phone className="w-3.5 h-3.5" /><span>{s.phone}</span>
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <User className="w-3.5 h-3.5" /><span>Parent: {s.parentName}</span>
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Phone className="w-3.5 h-3.5" /><span>Parent: {s.parentPhone}</span>
               </div>
             </div>
           </motion.div>

@@ -14,6 +14,7 @@ export interface Student {
   name: string;
   email: string;
   phone: string;
+  telegram?: string;
   parentName: string;
   parentPhone: string;
   avatar: string;

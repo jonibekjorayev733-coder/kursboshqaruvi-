@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "EduFlow Mobile",
+    "slug": "eduflow-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#020617"
+    },
+    "android": {
+      "package": "com.eduflow.mobile"
+    }
+  }
+}

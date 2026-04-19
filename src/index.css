@@ -1,8 +1,8 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 @layer base {
   :root {
@@ -44,6 +44,14 @@
     --chart-3: 142 71% 45%;
     --chart-4: 38 92% 50%;
     --chart-5: 0 84% 60%;
+    
+    /* Crystal Aurora Additions */
+    --glass-bg: rgba(255, 255, 255, 0.4);
+    --glass-border: rgba(255, 255, 255, 0.3);
+    --glass-shadow: rgba(0, 0, 0, 0.05);
+    --glass-blur: 24px;
+    --accent-primary: #3b82f6;
+    --accent-secondary: #8b5cf6;
   }
 
   .dark {
@@ -84,60 +92,181 @@
     --chart-3: 142 71% 45%;
     --chart-4: 38 92% 50%;
     --chart-5: 0 84% 60%;
+    
+    /* Crystal Aurora Additions */
+    --glass-bg: rgba(10, 10, 10, 0.6);
+    --glass-border: rgba(255, 255, 255, 0.05);
+    --glass-shadow: rgba(0, 0, 0, 0.5);
+    --accent-primary: #60a5fa;
+    --accent-secondary: #a78bfa;
   }
-}
 
-@layer base {
   * {
     @apply border-border;
   }
+  
   body {
-    @apply bg-background text-foreground font-sans antialiased;
+    @apply bg-background text-foreground font-sans antialiased transition-colors duration-500;
     font-family: 'Inter', system-ui, sans-serif;
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+
+  /* Udar Pro Max - Crystal Aurora Design System */
+  :root {
+    --aurora-1: #3b82f6;
+    --aurora-2: #8b5cf6;
+    --aurora-3: #ec4899;
+  }
+
+  .crystal-glass {
+    backdrop-filter: blur(40px);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+      0 30px 60px -15px rgba(0, 0, 0, 0.7),
+      inset 0 1px 1px 0 rgba(255, 255, 255, 0.1);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .crystal-glass::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    background-size: 200% 200%;
+    animation: crystal-glint 10s infinite linear;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  @keyframes crystal-glint {
+    0% {
+      background-position: 200% 0;
+    }
+
+    100% {
+      background-position: -200% 200%;
+    }
+  }
+
+  .udar-panel {
+    @apply crystal-glass rounded-[3rem] p-10 transition-all duration-1000;
+  }
+
+  /* Aurora Background Spots */
+  .aurora-bg {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: #020202;
+    overflow: hidden;
+  }
+
+  .aurora-spot {
+    position: absolute;
+    filter: blur(150px);
+    opacity: 0.15;
+    animation: aurora-float 20s infinite alternate;
+  }
+
+  @keyframes aurora-float {
+    0% {
+      transform: translate(0, 0) scale(1);
+    }
+
+    100% {
+      transform: translate(100px, 50px) scale(1.2);
+    }
+  }
+
+  /* Ultra-Premium Stat Cards */
+  .udar-card-v2 {
+    @apply crystal-glass rounded-[2rem] p-8 transition-all duration-700 cursor-pointer;
+    background: linear-gradient(165deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 100%);
+  }
+
+  .udar-card-v2:hover {
+    @apply border-white/20 -translate-y-2;
+    box-shadow:
+      0 40px 80px -20px rgba(0, 0, 0, 0.8),
+      0 0 30px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  /* Typography / Labels */
+  .text-glow {
+    /* Disabled due to conflict with transparent background-clip */
+  }
+
+  .udar-heading {
+    @apply font-black italic tracking-tight leading-none;
+    letter-spacing: -0.05em;
+    background: linear-gradient(to bottom, #fff 40%, rgba(255, 255, 255, 0.4));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .udar-label {
+    @apply text-[10px] font-black uppercase tracking-[0.5em] text-white/20 select-none;
+  }
+
+  /* Active Indicator */
+  .liquid-marker {
+    @apply absolute left-0 w-1.5 h-1/2 rounded-full bg-primary;
+    box-shadow: 0 0 30px 5px var(--primary);
+    filter: blur(0.5px);
+  }
+
+  /* Luxury Components */
+  .luxury-button {
+    @apply relative overflow-hidden rounded-2xl px-8 py-4 bg-white/5 border border-white/10 font-black uppercase tracking-[0.3em] text-[10px] transition-all;
+  }
+
+  .luxury-button::before {
+    content: '';
+    @apply absolute inset-0 bg-primary opacity-0 transition-opacity duration-500;
+  }
+
+  .luxury-button:hover {
+    @apply scale-105 border-primary/40 shadow-[0_0_40px_-10px_var(--primary)];
+  }
+
+  /* Glass Input */
+  .glass-input {
+    @apply bg-white/5 border border-white/5 rounded-2xl px-6 py-4 outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/10 transition-all font-bold;
   }
 }
 
 @layer utilities {
   .glass {
-    @apply bg-card/80 backdrop-blur-xl border border-border/50;
-  }
-  .gradient-primary {
-    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
-  }
-  .gradient-text {
-    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
-  .animate-shimmer {
-    animation: shimmer 2s linear infinite;
-    background: linear-gradient(
-      90deg,
-      hsl(var(--muted)) 0%,
-      hsl(var(--muted-foreground) / 0.1) 50%,
-      hsl(var(--muted)) 100%
-    );
-    background-size: 200% 100%;
+    @apply bg-black/40 backdrop-blur-3xl border border-transparent transition-all duration-500;
+    box-shadow: 
+      0 15px 35px -5px rgba(0, 0, 0, 0.6),
+      inset 0 1px 1px 0 rgba(255, 255, 255, 0.06);
   }
 }
 
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+html {
+  scroll-behavior: smooth;
 }
 
-/* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.3);
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.5);
+  background: rgba(255, 255, 255, 0.1);
 }

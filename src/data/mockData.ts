@@ -1,20 +1,20 @@
 import { Student, Teacher, Course, Attendance, Performance, Payment, Notification } from '@/types';
 
-const avatarUrl = (seed: string) => `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(seed)}&backgroundColor=0ea5e9,7c3aed,22c55e,f59e0b&fontFamily=Inter`;
+const avatarUrl = (type: 'student' | 'teacher' | 'admin') => `/avatars/${type}.png`;
 
 export const students: Student[] = [
-  { id: 's1', userId: 'u1', name: 'Alex Johnson', email: 'alex@example.com', phone: '+1-555-0101', parentName: 'Robert Johnson', parentPhone: '+1-555-0102', avatar: avatarUrl('Alex Johnson'), enrolledCourses: ['c1', 'c2', 'c4'], enrollmentDate: '2024-09-01' },
-  { id: 's2', userId: 'u2', name: 'Maria Garcia', email: 'maria@example.com', phone: '+1-555-0103', parentName: 'Carlos Garcia', parentPhone: '+1-555-0104', avatar: avatarUrl('Maria Garcia'), enrolledCourses: ['c1', 'c3'], enrollmentDate: '2024-09-01' },
-  { id: 's3', userId: 'u3', name: 'James Chen', email: 'james@example.com', phone: '+1-555-0105', parentName: 'Wei Chen', parentPhone: '+1-555-0106', avatar: avatarUrl('James Chen'), enrolledCourses: ['c2', 'c3', 'c4'], enrollmentDate: '2024-10-15' },
-  { id: 's4', userId: 'u4', name: 'Sophie Laurent', email: 'sophie@example.com', phone: '+1-555-0107', parentName: 'Pierre Laurent', parentPhone: '+1-555-0108', avatar: avatarUrl('Sophie Laurent'), enrolledCourses: ['c1', 'c4'], enrollmentDate: '2024-09-01' },
-  { id: 's5', userId: 'u5', name: 'Omar Hassan', email: 'omar@example.com', phone: '+1-555-0109', parentName: 'Ahmed Hassan', parentPhone: '+1-555-0110', avatar: avatarUrl('Omar Hassan'), enrolledCourses: ['c2', 'c3'], enrollmentDate: '2024-11-01' },
-  { id: 's6', userId: 'u6', name: 'Emma Wilson', email: 'emma@example.com', phone: '+1-555-0111', parentName: 'David Wilson', parentPhone: '+1-555-0112', avatar: avatarUrl('Emma Wilson'), enrolledCourses: ['c1', 'c2', 'c3', 'c4'], enrollmentDate: '2024-09-01' },
+  { id: 's1', userId: 'u1', name: 'Alex Johnson', email: 'alex@example.com', phone: '+1-555-0101', telegram: '@alex_j', parentName: 'Robert Johnson', parentPhone: '+1-555-0102', avatar: avatarUrl('student'), enrolledCourses: ['c1', 'c2', 'c4'], enrollmentDate: '2024-09-01' },
+  { id: 's2', userId: 'u2', name: 'Maria Garcia', email: 'maria@example.com', phone: '+1-555-0103', telegram: '@mariag', parentName: 'Carlos Garcia', parentPhone: '+1-555-0104', avatar: avatarUrl('student'), enrolledCourses: ['c1', 'c3'], enrollmentDate: '2024-09-01' },
+  { id: 's3', userId: 'u3', name: 'James Chen', email: 'james@example.com', phone: '+1-555-0105', telegram: '@jchen_tech', parentName: 'Wei Chen', parentPhone: '+1-555-0106', avatar: avatarUrl('student'), enrolledCourses: ['c2', 'c3', 'c4'], enrollmentDate: '2024-10-15' },
+  { id: 's4', userId: 'u4', name: 'Sophie Laurent', email: 'sophie@example.com', phone: '+1-555-0107', telegram: '@sophie_l', parentName: 'Pierre Laurent', parentPhone: '+1-555-0108', avatar: avatarUrl('student'), enrolledCourses: ['c1', 'c4'], enrollmentDate: '2024-09-01' },
+  { id: 's5', userId: 'u5', name: 'Omar Hassan', email: 'omar@example.com', phone: '+1-555-0109', telegram: '@ohassan', parentName: 'Ahmed Hassan', parentPhone: '+1-555-0110', avatar: avatarUrl('student'), enrolledCourses: ['c2', 'c3'], enrollmentDate: '2024-11-01' },
+  { id: 's6', userId: 'u6', name: 'Emma Wilson', email: 'emma@example.com', phone: '+1-555-0111', telegram: '@emma_w', parentName: 'David Wilson', parentPhone: '+1-555-0112', avatar: avatarUrl('student'), enrolledCourses: ['c1', 'c2', 'c3', 'c4'], enrollmentDate: '2024-09-01' },
 ];
 
 export const teachers: Teacher[] = [
-  { id: 't1', userId: 'ut1', name: 'Dr. Sarah Mitchell', email: 'sarah@example.com', phone: '+1-555-0201', avatar: avatarUrl('Sarah Mitchell'), assignedCourses: ['c1', 'c4'], specialization: 'Mathematics' },
-  { id: 't2', userId: 'ut2', name: 'Prof. David Kim', email: 'david@example.com', phone: '+1-555-0202', avatar: avatarUrl('David Kim'), assignedCourses: ['c2'], specialization: 'Computer Science' },
-  { id: 't3', userId: 'ut3', name: 'Ms. Elena Rodriguez', email: 'elena@example.com', phone: '+1-555-0203', avatar: avatarUrl('Elena Rodriguez'), assignedCourses: ['c3'], specialization: 'Physics' },
+  { id: 't1', userId: 'ut1', name: 'Dr. Sarah Mitchell', email: 'sarah@example.com', phone: '+1-555-0201', avatar: avatarUrl('teacher'), assignedCourses: ['c1', 'c4'], specialization: 'Mathematics' },
+  { id: 't2', userId: 'ut2', name: 'Prof. David Kim', email: 'david@example.com', phone: '+1-555-0202', avatar: avatarUrl('teacher'), assignedCourses: ['c2'], specialization: 'Computer Science' },
+  { id: 't3', userId: 'ut3', name: 'Ms. Elena Rodriguez', email: 'elena@example.com', phone: '+1-555-0203', avatar: avatarUrl('teacher'), assignedCourses: ['c3'], specialization: 'Physics' },
 ];
 
 export const courses: Course[] = [

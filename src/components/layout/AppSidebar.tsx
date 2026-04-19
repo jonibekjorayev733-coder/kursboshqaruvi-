@@ -22,17 +22,19 @@ const navItems: Record<UserRole, NavItem[]> = {
   ],
   teacher: [
     { label: 'Dashboard', path: '/teacher', icon: <LayoutDashboard className="w-5 h-5" /> },
-    { label: 'Students', path: '/teacher/students', icon: <Users className="w-5 h-5" /> },
-    { label: 'Groups', path: '/teacher/groups', icon: <BookOpen className="w-5 h-5" /> },
+    { label: 'Courses', path: '/teacher/courses', icon: <BookOpen className="w-5 h-5" /> },
     { label: 'Attendance', path: '/teacher/attendance', icon: <UserCheck className="w-5 h-5" /> },
+    { label: 'Notifications', path: '/teacher/notifications', icon: <Bell className="w-5 h-5" /> },
     { label: 'Reports', path: '/teacher/reports', icon: <FileText className="w-5 h-5" /> },
   ],
   admin: [
     { label: 'Dashboard', path: '/admin', icon: <LayoutDashboard className="w-5 h-5" /> },
     { label: 'Teachers', path: '/admin/teachers', icon: <GraduationCap className="w-5 h-5" /> },
     { label: 'Students', path: '/admin/students', icon: <Users className="w-5 h-5" /> },
+    { label: 'Course Students', path: '/admin/course-students', icon: <UserCheck className="w-5 h-5" /> },
     { label: 'Courses', path: '/admin/courses', icon: <BookOpen className="w-5 h-5" /> },
     { label: 'Payments', path: '/admin/payments', icon: <CreditCard className="w-5 h-5" /> },
+    { label: 'Notifications', path: '/admin/notifications', icon: <Bell className="w-5 h-5" /> },
     { label: 'Analytics', path: '/admin/analytics', icon: <BarChart3 className="w-5 h-5" /> },
   ],
 };
@@ -57,7 +59,7 @@ export function AppSidebar() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-background/60 backdrop-blur-sm z-40 lg:hidden"
+            className="fixed inset-0 bg-black/80 backdrop-blur-xl z-40 lg:hidden"
             onClick={() => setSidebarOpen(false)}
           />
         )}
@@ -65,47 +67,62 @@ export function AppSidebar() {
 
       <motion.aside
         initial={false}
-        animate={{ width: sidebarOpen ? 260 : 72 }}
-        transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-        className={`fixed left-0 top-0 h-full bg-sidebar z-50 flex flex-col border-r border-sidebar-border
+        animate={{ width: sidebarOpen ? 280 : 100 }}
+        transition={{ duration: 0.8, ease: [0.23, 1, 0.32, 1] }}
+        className={`fixed left-0 top-0 h-full z-50 flex flex-col border-r border-white/10 shadow-[0_20px_80px_rgba(0,0,0,0.75)] transition-transform duration-500
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        style={{
+          background: 'linear-gradient(180deg, rgba(8,8,10,0.98) 0%, rgba(4,4,6,0.98) 100%)',
+          backdropFilter: 'blur(24px)'
+        }}
       >
-        {/* Logo */}
-        <div className="h-16 flex items-center px-5 gap-3 border-b border-sidebar-border shrink-0">
-          <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center shrink-0">
-            <GraduationCap className="w-5 h-5 text-primary-foreground" />
-          </div>
+        {/* Diamond-Cut Logo Area */}
+        <div className="h-28 flex items-center px-6 gap-4 shrink-0 border-b border-white/10 relative overflow-hidden group">
+          <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />
+          <motion.div
+            whileHover={{ scale: 1.15, rotate: 12 }}
+            className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/10 border border-cyan-400/20 flex items-center justify-center shrink-0 shadow-[0_10px_30px_rgba(0,180,255,0.25)] relative z-10"
+          >
+            <GraduationCap className="w-6 h-6 text-cyan-300" />
+          </motion.div>
           <AnimatePresence>
             {sidebarOpen && (
-              <motion.span
-                initial={{ opacity: 0, width: 0 }}
-                animate={{ opacity: 1, width: 'auto' }}
-                exit={{ opacity: 0, width: 0 }}
-                className="text-lg font-bold text-sidebar-foreground whitespace-nowrap overflow-hidden"
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="flex flex-col relative z-10"
               >
-                EduFlow
-              </motion.span>
+                <span className="text-2xl font-black tracking-tight text-white">EduFlow</span>
+                <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-300/70">Ultra Pro Max</span>
+              </motion.div>
             )}
           </AnimatePresence>
         </div>
 
-        {/* Role badge */}
-        <div className="px-4 py-3">
-          {sidebarOpen ? (
-            <div className="px-3 py-2 rounded-lg bg-sidebar-accent text-xs font-medium text-sidebar-muted uppercase tracking-wider">
-              {roleLabels[role]} Panel
-            </div>
-          ) : (
-            <div className="flex justify-center">
-              <div className="w-8 h-8 rounded-lg bg-sidebar-accent flex items-center justify-center text-xs font-bold text-sidebar-muted">
-                {role[0].toUpperCase()}
-              </div>
-            </div>
-          )}
+        {/* Role Identity - Refined */}
+        <div className="px-4 py-5">
+          <div className="px-4 py-3 rounded-xl bg-white/[0.04] border border-white/10 flex items-center gap-3 relative overflow-hidden group shadow-inner">
+            <div className="absolute inset-0 bg-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+            <div className="w-2 h-2 rounded-full bg-cyan-300 animate-pulse shadow-[0_0_10px_rgba(34,211,238,0.8)]" />
+            <AnimatePresence>
+              {sidebarOpen ? (
+                <motion.span
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70 truncate relative z-10"
+                >
+                  {roleLabels[role]} Command
+                </motion.span>
+              ) : (
+                <span className="text-xs font-bold text-cyan-300 relative z-10">{role[0].toUpperCase()}</span>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
 
-        {/* Nav items */}
-        <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+        {/* Liquid Navigation */}
+        <nav className="flex-1 px-3 space-y-2 overflow-y-auto py-4 luxury-scroll relative">
           {items.map((item) => {
             const isActive = location.pathname === item.path;
             return (
@@ -113,45 +130,67 @@ export function AppSidebar() {
                 key={item.path}
                 to={item.path}
                 onClick={() => window.innerWidth < 1024 && setSidebarOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all relative group
+                className={`h-12 flex items-center gap-3 px-3 rounded-xl border transition-all relative group overflow-hidden
                   ${isActive
-                    ? 'bg-sidebar-primary/15 text-sidebar-primary'
-                    : 'text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent'
+                    ? 'text-cyan-200 bg-gradient-to-r from-cyan-500/20 to-blue-500/10 border-cyan-400/30 shadow-[0_10px_25px_rgba(0,145,255,0.22)]'
+                    : 'text-slate-300 border-transparent hover:text-white hover:bg-white/[0.05] hover:border-white/10'
                   }`}
               >
                 {isActive && (
                   <motion.div
-                    layoutId="sidebar-active"
-                    className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-sidebar-primary"
-                    transition={{ duration: 0.3 }}
+                    layoutId="liquid-active-marker"
+                    className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-7 rounded-r-full bg-cyan-300 shadow-[0_0_16px_rgba(34,211,238,0.9)]"
+                    transition={{ type: "spring", bounce: 0.2, duration: 0.8 }}
                   />
                 )}
-                <span className="shrink-0">{item.icon}</span>
+
+                <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all duration-300 relative z-10 ${
+                  isActive
+                    ? 'bg-cyan-400/15 text-cyan-200'
+                    : 'bg-white/[0.04] text-slate-300 group-hover:bg-white/[0.08] group-hover:text-white'
+                }`}>
+                  {item.icon}
+                </span>
+
                 <AnimatePresence>
                   {sidebarOpen && (
                     <motion.span
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="whitespace-nowrap overflow-hidden"
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      className="whitespace-nowrap overflow-hidden text-sm font-semibold relative z-10"
                     >
                       {item.label}
                     </motion.span>
                   )}
                 </AnimatePresence>
+
+                {isActive && (
+                  <motion.div
+                    layoutId="active-dot-luxury"
+                    className="absolute right-4 w-1.5 h-1.5 rounded-full bg-cyan-200 shadow-[0_0_10px_rgba(34,211,238,0.9)]"
+                  />
+                )}
               </NavLink>
             );
           })}
         </nav>
 
-        {/* Collapse toggle */}
-        <div className="p-3 border-t border-sidebar-border hidden lg:block">
+        {/* Refined Collapse Toggle */}
+        <div className="p-4 border-t border-white/10">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+            className="w-full h-12 flex items-center justify-center gap-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 transition-all group overflow-hidden relative"
           >
-            {sidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-            {sidebarOpen && <span>Collapse</span>}
+            <motion.div
+              animate={{ rotate: sidebarOpen ? 0 : 180 }}
+              transition={{ duration: 0.8, ease: "backOut" }}
+              className="relative z-10"
+            >
+              {sidebarOpen ? <ChevronLeft className="w-5 h-5 text-slate-300 group-hover:text-cyan-200" /> : <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-cyan-200" />}
+            </motion.div>
+            {sidebarOpen && <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300 group-hover:text-cyan-200 relative z-10">Conceal Interface</span>}
+            <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           </button>
         </div>
       </motion.aside>

@@ -1,71 +1,332 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { PageHeader } from '@/components/shared/PageHeader';
-import { DataTable } from '@/components/shared/DataTable';
-import { teachers, courses } from '@/data/mockData';
-import type { Teacher } from '@/types';
+import { api, Teacher, Course } from '@/services/api';
+import { Plus, Trash2, Edit, Users, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
+import { ConfirmModal } from '@/components/shared/ConfirmModal';
 
 export default function AdminTeachers() {
-  const [selectedTeacher, setSelectedTeacher] = useState<string | null>(null);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ open: boolean; type: 'delete' | 'edit'; id?: number; name?: string; teacher?: Teacher }>({ open: false, type: 'delete' });
+  const [newTeacher, setNewTeacher] = useState({
+    name: '',
+    email: '',
+    password: '',
+    avatar: 'https://i.pravatar.cc/150?img=1',
+    subject: '',
+    course_id: undefined as number | undefined
+  });
 
-  const columns = [
-    { key: 'name', label: 'Teacher', render: (t: Teacher) => (
-      <div className="flex items-center gap-3">
-        <img src={t.avatar} alt={t.name} className="w-8 h-8 rounded-full" />
-        <div>
-          <p className="font-medium">{t.name}</p>
-          <p className="text-xs text-muted-foreground">{t.email}</p>
-        </div>
-      </div>
-    )},
-    { key: 'specialization', label: 'Specialization' },
-    { key: 'phone', label: 'Phone' },
-    { key: 'courses', label: 'Courses', render: (t: Teacher) => (
-      <div className="flex flex-wrap gap-1">
-        {courses.filter(c => t.assignedCourses.includes(c.id)).map(c => (
-          <span key={c.id} className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: c.color + '20', color: c.color }}>
-            {c.name}
-          </span>
-        ))}
-      </div>
-    )},
-    { key: 'action', label: '', render: (t: Teacher) => (
-      <button onClick={() => setSelectedTeacher(t.id)} className="px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors">
-        Manage
-      </button>
-    )},
-  ];
+  useEffect(() => {
+    fetchTeachers();
+    fetchCourses();
+  }, []);
+
+  const fetchCourses = async () => {
+    try {
+      const data = await api.getCourses();
+      setCourses(data);
+    } catch (error) {
+      console.error('Kurslar yuklanishida xatolik:', error);
+    }
+  };
+
+  const fetchTeachers = async () => {
+    try {
+      const data = await api.getTeachers();
+      setTeachers(data);
+    } catch (error) {
+      toast.error('O\'qituvchilar yuklanishida xatolik');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!newTeacher.name || !newTeacher.email || (!editingId && !newTeacher.password) || !newTeacher.course_id) {
+      toast.error('Majburiy maydonlarni to\'ldiring');
+      return;
+    }
+    try {
+      if (editingId) {
+        await api.updateTeacher(editingId, newTeacher);
+        toast.success(`O'qituvchi o'zgartirildi: "${newTeacher.name}"`);
+      } else {
+        await api.createTeacher(newTeacher);
+        toast.success(`O'qituvchi qo'shildi: "${newTeacher.name}"`);
+      }
+    } catch (error: any) {
+      console.error('❌ Error:', error);
+      toast.error(`Xatolik: ${error.message}`);
+      return;
+    }
+    
+    // Close modal and reset
+    setShowModal(false);
+    setEditingId(null);
+    setNewTeacher({ name: '', email: '', password: '', avatar: 'https://i.pravatar.cc/150?img=' + Math.floor(Math.random() * 70), subject: '', course_id: undefined });
+    
+    // Refresh list
+    await fetchTeachers();
+  };
+
+  const handleDelete = async (id: number) => {
+    try {
+      await api.deleteTeacher(id);
+      toast.success('O\'qituvchi o\'chirildi');
+      await fetchTeachers();
+    } catch (error: any) {
+      console.error('❌ Delete error:', error);
+      toast.error(`Xatolik: ${error.message}`);
+    }
+  };
+
+  const handleEdit = (teacher: Teacher) => {
+    setConfirmModal({ open: true, type: 'edit', id: teacher.id || undefined, name: teacher.name, teacher });
+  };
+
+  const doEdit = (teacher: Teacher) => {
+    setNewTeacher({
+      name: teacher.name,
+      email: teacher.email,
+      password: '',
+      avatar: teacher.avatar || '',
+      subject: teacher.subject || '',
+      course_id: teacher.course_id
+    });
+    setEditingId(teacher.id || null);
+    setShowModal(true);
+  };
+
+  if (loading) return <div className="text-center py-20 text-slate-400">Yuklanmoqda...</div>;
+
+  const courseMap = new Map(courses.map(c => [c.id, c.name]));
 
   return (
-    <div>
-      <PageHeader title="Teachers" subtitle="Manage teacher assignments" />
+    <motion.div initial="hidden" animate="visible" variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } }} className="space-y-8">
+      
+      {/* PREMIUM HEADER */}
+      <motion.div variants={{ hidden: { opacity: 0, y: -20 }, visible: { opacity: 1, y: 0 } }} className="relative overflow-hidden rounded-3xl p-8 md:p-12 bg-gradient-to-br from-slate-800 to-slate-900 border border-cyan-500/30 shadow-2xl">
+        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
+        <div className="relative z-10">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl md:text-5xl font-black text-white mb-2 tracking-tight">O'qituvchilar Boshqaruvi</h1>
+              <p className="text-cyan-300/80 text-lg font-medium">Barcha o'qituvchilarni boshqaring va kurslarni tayinlang</p>
+            </div>
+            <Users className="w-24 h-24 text-cyan-400 opacity-80" />
+          </div>
+        </div>
+      </motion.div>
 
-      {/* Assignment panel */}
-      {selectedTeacher && (
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Assign Courses — {teachers.find(t => t.id === selectedTeacher)?.name}</h3>
-            <button onClick={() => setSelectedTeacher(null)} className="text-xs text-muted-foreground hover:text-foreground">Close</button>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {courses.map(c => {
-              const isAssigned = teachers.find(t => t.id === selectedTeacher)?.assignedCourses.includes(c.id);
-              return (
-                <button key={c.id} onClick={() => toast.success(`Course ${isAssigned ? 'removed' : 'assigned'}`)}
-                  className={`p-3 rounded-xl text-sm font-medium transition-all border ${
-                    isAssigned ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50'
-                  }`}>
-                  <div className="w-3 h-3 rounded-full mb-2" style={{ backgroundColor: c.color }} />
-                  {c.name}
-                </button>
-              );
-            })}
-          </div>
+      {/* TOOLBAR */}
+      <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }} className="flex justify-between items-center">
+        <h2 className="text-2xl font-black text-white">Jami: {teachers.length} o'qituvchi</h2>
+        <motion.button
+          whileHover={{ y: -2 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => {
+            setEditingId(null);
+            setNewTeacher({ name: '', email: '', password: '', avatar: 'https://i.pravatar.cc/150?img=' + Math.floor(Math.random() * 70), subject: '', course_id: undefined });
+            setShowModal(true);
+          }}
+          className="flex items-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-cyan-500 text-white font-black text-sm hover:shadow-lg hover:shadow-cyan-500/50 transition-all"
+        >
+          <Plus className="w-4 h-4" />
+          Yangi O'qituvchi
+        </motion.button>
+      </motion.div>
+
+      {/* TEACHERS GRID */}
+      {teachers.length === 0 ? (
+        <motion.div variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }} className="text-center py-16 bg-slate-800/30 rounded-2xl border border-slate-700/50">
+          <Users className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+          <p className="text-slate-400 text-lg font-black">O'qituvchi topilmadi</p>
+        </motion.div>
+      ) : (
+        <motion.div variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.05 } } }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {teachers.map((teacher, idx) => (
+            <motion.div
+              key={teacher.id}
+              variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}
+              className="relative overflow-hidden rounded-2xl p-6 bg-gradient-to-br from-slate-800 to-slate-900 border border-cyan-500/30 hover:border-cyan-400/60 transition-all group"
+            >
+              <div className="flex items-start gap-4 mb-4">
+                <motion.img
+                  whileHover={{ scale: 1.1 }}
+                  src={teacher.avatar || 'https://i.pravatar.cc/150'}
+                  alt={teacher.name}
+                  className="w-14 h-14 rounded-xl object-cover border-2 border-cyan-500/30"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-black text-sm">{teacher.name}</p>
+                  <p className="text-slate-400 text-xs">{teacher.email}</p>
+                  {teacher.subject && <p className="text-cyan-400 text-xs font-black mt-1">{teacher.subject}</p>}
+                </div>
+              </div>
+
+              {/* Course Info */}
+              <div className="mb-4 p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/30">
+                <div className="flex items-center gap-2 text-sm">
+                  <BookOpen className="w-4 h-4 text-cyan-400" />
+                  <span className="text-cyan-300 font-black">
+                    {courseMap.get(teacher.course_id!) || 'Kurs tanlanmagan'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 pt-4 border-t border-slate-700/50">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => handleEdit(teacher)}
+                  className="flex-1 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 font-black text-xs uppercase transition-colors flex items-center justify-center gap-1"
+                >
+                  <Edit className="w-3 h-3" />
+                  O'zgartirish
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setConfirmModal({ open: true, type: 'delete', id: teacher.id as number, name: teacher.name })}
+                  className="flex-1 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black text-xs uppercase transition-colors flex items-center justify-center gap-1"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  O'chirish
+                </motion.button>
+              </div>
+            </motion.div>
+          ))}
         </motion.div>
       )}
 
-      <DataTable columns={columns} data={teachers} keyExtractor={t => t.id} />
-    </div>
+      {/* MODAL */}
+      {showModal && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={() => {
+            setShowModal(false);
+            setEditingId(null);
+            setNewTeacher({ name: '', email: '', password: '', avatar: 'https://i.pravatar.cc/150?img=' + Math.floor(Math.random() * 70), subject: '', course_id: undefined });
+          }}
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-slate-800 rounded-2xl p-8 w-full max-w-md border border-cyan-500/30 shadow-2xl"
+          >
+            <h2 className="text-2xl font-black text-white mb-6">
+              {editingId ? 'O\'qituvchini O\'zgartirish' : 'Yangi O\'qituvchi Qo\'shish'}
+            </h2>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2 block">O'qituvchi Nomi *</label>
+                <input
+                  value={newTeacher.name}
+                  onChange={(e) => setNewTeacher(p => ({ ...p, name: e.target.value }))}
+                  className="w-full px-4 py-3 rounded-xl bg-slate-700/50 border border-cyan-500/30 text-white focus:outline-none focus:border-cyan-400/50"
+                  placeholder="Ism va Familiya"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black uppercase tracking-widest text-cyan-400 mb-2 block">Email *</label>
+                <input
+                  value={newTeacher.email}
+                  onChange={(e) => setNewTeacher(p => ({ ...p, email: e.target.value }))}
+                  className="w-full px-4 py-3 rounded-xl bg-slate-700/50 border border-cyan-500/30 text-white focus:outline-none focus:border-cyan-400/50"
+                  placeholder="email@example.com"
+                />
+              </div>
+
+              {!editingId && (
+                <div>
+                  <label className="text-xs font-black uppercase tracking-widest text-cyan-400 mb-2 block">Parol *</label>
+                  <input
+                    type="password"
+                    value={newTeacher.password}
+                    onChange={(e) => setNewTeacher(p => ({ ...p, password: e.target.value }))}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-700/50 border border-cyan-500/30 text-white focus:outline-none focus:border-cyan-400/50"
+                    placeholder="••••••••"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-black uppercase tracking-widest text-cyan-400 mb-2 block">Predmet</label>
+                <input
+                  value={newTeacher.subject}
+                  onChange={(e) => setNewTeacher(p => ({ ...p, subject: e.target.value }))}
+                  className="w-full px-4 py-3 rounded-xl bg-slate-700/50 border border-cyan-500/30 text-white focus:outline-none focus:border-cyan-400/50"
+                  placeholder="e.g. Matematika"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black uppercase tracking-widest text-cyan-400 mb-2 block">Kurs *</label>
+                <select
+                  value={newTeacher.course_id || ''}
+                  onChange={(e) => setNewTeacher(p => ({ ...p, course_id: e.target.value ? parseInt(e.target.value) : undefined }))}
+                  className="w-full px-4 py-3 rounded-xl bg-slate-700/50 border border-cyan-500/30 text-white focus:outline-none focus:border-cyan-400/50"
+                >
+                  <option value="">Kurs tanlang...</option>
+                  {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-8">
+              <motion.button
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => {
+                  setShowModal(false);
+                  setEditingId(null);
+                  setNewTeacher({ name: '', email: '', password: '', avatar: 'https://i.pravatar.cc/150?img=' + Math.floor(Math.random() * 70), subject: '', course_id: undefined });
+                }}
+                className="flex-1 py-3 rounded-xl bg-slate-700/50 hover:bg-slate-700/70 text-white font-black uppercase transition-colors"
+              >
+                Bekor Qilish
+              </motion.button>
+              <motion.button
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleCreate}
+                className="flex-1 py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-cyan-500 text-white font-black uppercase hover:shadow-lg hover:shadow-cyan-500/50 transition-all"
+              >
+                {editingId ? 'O\'zgartirish' : 'Qo\'shish'}
+              </motion.button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* CONFIRM MODAL */}
+      <ConfirmModal
+        open={confirmModal.open}
+        type={confirmModal.type}
+        title={confirmModal.name}
+        onCancel={() => setConfirmModal(p => ({ ...p, open: false }))}
+        onConfirm={() => {
+          if (confirmModal.type === 'delete' && confirmModal.id) {
+            handleDelete(confirmModal.id);
+          } else if (confirmModal.type === 'edit' && confirmModal.teacher) {
+            doEdit(confirmModal.teacher);
+          }
+          setConfirmModal(p => ({ ...p, open: false }));
+        }}
+      />
+
+    </motion.div>
   );
 }

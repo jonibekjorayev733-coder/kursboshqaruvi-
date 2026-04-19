@@ -1,96 +1,113 @@
-import { useState, useMemo } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useEffect } from 'react';
 import { PageHeader } from '@/components/shared/PageHeader';
-import { DataTable } from '@/components/shared/DataTable';
-import { StatusBadge } from '@/components/shared/StatusBadge';
-import { attendance, courses, students } from '@/data/mockData';
-import type { Attendance } from '@/types';
-
-const currentStudent = students[0];
-
-type Filter = 'all' | 'today' | 'week' | 'month';
+import { api } from '@/services/api';
+import { motion } from 'framer-motion';
+import { useLanguage } from '@/hooks/useTranslation';
+import { BookOpen, Check, X, Clock } from 'lucide-react';
 
 export default function StudentAttendance() {
-  const [filter, setFilter] = useState<Filter>('all');
-  const [courseFilter, setCourseFilter] = useState<string>('all');
+  const { t } = useLanguage();
+  const [attends, setAttends] = useState<any[]>([]);
+  const [courses, setCourses] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const records = useMemo(() => {
-    let data = attendance.filter(a => a.studentId === currentStudent.id);
-    if (courseFilter !== 'all') data = data.filter(a => a.courseId === courseFilter);
+  // get current student from localStorage
+  const currentStudentIdRaw = localStorage.getItem('user_id');
+  const currentStudentId = currentStudentIdRaw ? parseInt(currentStudentIdRaw, 10) : NaN;
 
-    const now = new Date('2025-04-01');
-    if (filter === 'today') {
-      const today = now.toISOString().split('T')[0];
-      data = data.filter(a => a.date === today);
-    } else if (filter === 'week') {
-      const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7);
-      data = data.filter(a => new Date(a.date) >= weekAgo);
-    } else if (filter === 'month') {
-      const monthAgo = new Date(now); monthAgo.setMonth(monthAgo.getMonth() - 1);
-      data = data.filter(a => new Date(a.date) >= monthAgo);
+  useEffect(() => {
+    if (Number.isNaN(currentStudentId)) {
+      setAttends([]);
+      setCourses([]);
+      setLoading(false);
+      return;
     }
-    return data.sort((a, b) => b.date.localeCompare(a.date));
-  }, [filter, courseFilter]);
 
-  const stats = useMemo(() => {
-    const total = records.length;
-    const present = records.filter(r => r.status === 'present').length;
-    const absent = records.filter(r => r.status === 'absent').length;
-    const late = records.filter(r => r.status === 'late').length;
-    return { total, present, absent, late, rate: total ? Math.round((present / total) * 100) : 0 };
-  }, [records]);
+    Promise.all([api.getAttendance(), api.getCourses()])
+      .then(([att, crs]) => {
+        setAttends(att.filter((a: any) => a.student_id === currentStudentId));
+        setCourses(crs);
+      })
+      .finally(() => setLoading(false));
+  }, [currentStudentId]);
 
-  const enrolledCourses = courses.filter(c => currentStudent.enrolledCourses.includes(c.id));
-  const filters: { value: Filter; label: string }[] = [
-    { value: 'all', label: 'All' }, { value: 'today', label: 'Today' },
-    { value: 'week', label: 'This Week' }, { value: 'month', label: 'This Month' },
-  ];
+  const courseMap = new Map(courses.map((c: any) => [c.id, c.name]));
 
-  const columns = [
-    { key: 'date', label: 'Date', render: (a: Attendance) => new Date(a.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) },
-    { key: 'course', label: 'Course', render: (a: Attendance) => courses.find(c => c.id === a.courseId)?.name || '' },
-    { key: 'status', label: 'Status', render: (a: Attendance) => <StatusBadge status={a.status} variant="dot" /> },
-    { key: 'lateMinutes', label: 'Late (min)', render: (a: Attendance) => a.lateMinutes ? `${a.lateMinutes} min` : '—' },
-    { key: 'grade', label: 'Grade', render: (a: Attendance) => a.grade ? <span className="font-medium">{a.grade}%</span> : '—' },
-  ];
+  const statusConfig: Record<string, { label: string; icon: any; bg: string; text: string }> = {
+    present: { label: 'Keldi', icon: Check, bg: 'bg-emerald-500/20', text: 'text-emerald-400' },
+    absent:  { label: 'Kelmadi', icon: X,     bg: 'bg-red-500/20',     text: 'text-red-400' },
+    late:    { label: 'Kech keldi', icon: Clock, bg: 'bg-yellow-500/20', text: 'text-yellow-400' },
+  };
+
+  // Summary stats
+  const total   = attends.length;
+  const present = attends.filter(a => a.status === 'present').length;
+  const absent  = attends.filter(a => a.status === 'absent').length;
+  const late    = attends.filter(a => a.status === 'late').length;
+
+  if (loading) return (
+    <div className="p-10 opacity-50 flex items-center justify-center">{t('status.loading')}</div>
+  );
 
   return (
-    <div>
-      <PageHeader title="Attendance" subtitle="Track your class attendance" />
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+      <PageHeader title={t('student.attendanceTitle')} subtitle={t('student.attendanceSubtitle')} />
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+      {/* Summary chips */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Present', value: stats.present, color: 'text-success' },
-          { label: 'Absent', value: stats.absent, color: 'text-destructive' },
-          { label: 'Late', value: stats.late, color: 'text-warning' },
-          { label: 'Rate', value: `${stats.rate}%`, color: 'text-primary' },
-        ].map((s, i) => (
-          <motion.div key={s.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }} className="glass rounded-xl p-4 text-center">
-            <p className="text-xs text-muted-foreground mb-1">{s.label}</p>
-            <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-          </motion.div>
+          { label: 'Jami', value: total,   color: 'border-cyan-500/40 text-cyan-300' },
+          { label: 'Keldi', value: present, color: 'border-emerald-500/40 text-emerald-300' },
+          { label: 'Kelmadi', value: absent, color: 'border-red-500/40 text-red-300' },
+          { label: 'Kech',  value: late,    color: 'border-yellow-500/40 text-yellow-300' },
+        ].map(chip => (
+          <div key={chip.label} className={`rounded-xl border bg-slate-800/60 px-4 py-3 ${chip.color}`}>
+            <p className="text-[10px] uppercase tracking-widest font-black opacity-80">{chip.label}</p>
+            <p className="text-2xl font-black leading-6 mt-0.5">{chip.value}</p>
+          </div>
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-6">
-        <div className="flex gap-1 bg-muted rounded-lg p-1">
-          {filters.map(f => (
-            <button key={f.value} onClick={() => setFilter(f.value)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${filter === f.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-              {f.label}
-            </button>
-          ))}
+      {/* Attendance list */}
+      {attends.length === 0 ? (
+        <div className="text-center py-14 rounded-2xl border border-slate-700/50 bg-slate-800/30 text-slate-400">
+          Hozircha davomat ma'lumoti yo'q
         </div>
-        <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)}
-          className="bg-muted border-0 rounded-lg px-3 py-1.5 text-xs font-medium focus:ring-2 focus:ring-primary">
-          <option value="all">All Courses</option>
-          {enrolledCourses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-      </div>
-
-      <DataTable columns={columns} data={records} keyExtractor={a => a.id} emptyMessage="No attendance records found" />
-    </div>
+      ) : (
+        <div className="space-y-3">
+          {attends.sort((a, b) => b.date?.localeCompare(a.date)).map((att: any) => {
+            const cfg = statusConfig[att.status] || statusConfig.absent;
+            const StatusIcon = cfg.icon;
+            const courseName = courseMap.get(att.course_id) || `Kurs #${att.course_id}`;
+            return (
+              <motion.div key={att.id}
+                initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                className={`flex items-center gap-4 rounded-xl p-4 border ${cfg.bg} ${att.status === 'present' ? 'border-emerald-500/30' : att.status === 'late' ? 'border-yellow-500/30' : 'border-red-500/30'}`}>
+                {/* Status icon */}
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${cfg.bg}`}>
+                  <StatusIcon className={`w-5 h-5 ${cfg.text}`} />
+                </div>
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-black ${cfg.bg} ${cfg.text}`}>
+                      {cfg.label}
+                    </span>
+                    <span className="flex items-center gap-1 text-xs text-slate-400 font-semibold">
+                      <BookOpen className="w-3.5 h-3.5 text-cyan-400" />
+                      {courseName}
+                    </span>
+                  </div>
+                  <p className="text-slate-400 text-xs mt-1">{att.date}</p>
+                  {att.late_minutes ? (
+                    <p className="text-yellow-400 text-xs mt-0.5">Kechikish: {att.late_minutes} daqiqa</p>
+                  ) : null}
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+    </motion.div>
   );
 }
