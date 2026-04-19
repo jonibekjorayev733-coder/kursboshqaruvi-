@@ -368,7 +368,21 @@ export const api = {
         const response = await fetch(`${API_URL}/courses/${id}`, {
             method: 'DELETE',
         });
-        if (!response.ok) throw new Error('Failed to delete course');
+        if (!response.ok) {
+            let errorMessage = 'Failed to delete course';
+            try {
+                const body = await response.json();
+                if (body?.detail) {
+                    errorMessage = String(body.detail);
+                }
+            } catch {
+                const raw = await response.text();
+                if (raw) {
+                    errorMessage = raw;
+                }
+            }
+            throw new Error(errorMessage);
+        }
     },
 
     // Enrollments

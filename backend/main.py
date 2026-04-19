@@ -596,10 +596,34 @@ def update_course(course_id: int, course: schemas.CourseCreate, db: Session = De
 @app.delete("/courses/{course_id}")
 def delete_course(course_id: int, db: Session = Depends(get_db)):
     db_course = db.query(models.Course).filter(models.Course.id == course_id).first()
-    if db_course is None: raise HTTPException(status_code=404)
+    if db_course is None:
+        raise HTTPException(status_code=404, detail="Course not found")
+
     deleted_payload = {"course_id": db_course.id, "name": db_course.name, "teacher_id": db_course.teacher_id}
-    db.delete(db_course)
-    db.commit()
+
+    try:
+        assignment_ids = [item[0] for item in db.query(models.Assignment.id).filter(models.Assignment.course_id == course_id).all()]
+
+        if assignment_ids:
+            db.query(models.Notification).filter(models.Notification.assignment_id.in_(assignment_ids)).delete(synchronize_session=False)
+            db.query(models.AssignmentProgress).filter(models.AssignmentProgress.assignment_id.in_(assignment_ids)).delete(synchronize_session=False)
+
+        db.query(models.AssignmentProgress).filter(models.AssignmentProgress.course_id == course_id).delete(synchronize_session=False)
+        db.query(models.Assignment).filter(models.Assignment.course_id == course_id).delete(synchronize_session=False)
+        db.query(models.Payment).filter(models.Payment.course_id == course_id).delete(synchronize_session=False)
+        db.query(models.CourseEnrollment).filter(models.CourseEnrollment.course_id == course_id).delete(synchronize_session=False)
+        db.query(models.Attendance).filter(models.Attendance.course_id == course_id).delete(synchronize_session=False)
+        db.query(models.Performance).filter(models.Performance.course_id == course_id).delete(synchronize_session=False)
+
+        db.delete(db_course)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Course cannot be deleted: {str(exc.orig)}")
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Course deletion failed: {str(exc)}")
+
     invalidate_reference_caches()
     emit_role_events("admin", "course.deleted", deleted_payload)
     if deleted_payload.get("teacher_id"):
