@@ -326,43 +326,50 @@ def delete_course(course_id: int, db: Session = Depends(get_db)):
 # Course Enrollments
 @app.post("/enrollments/")
 def create_enrollment(enrollment: schemas.CourseEnrollmentCreate, db: Session = Depends(get_db)):
-    existing = db.query(models.CourseEnrollment).filter(
-        models.CourseEnrollment.student_id == enrollment.student_id,
-        models.CourseEnrollment.course_id == enrollment.course_id
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Student already enrolled in this course")
-    
-    db_enrollment = models.CourseEnrollment(**enrollment.model_dump())
-    db.add(db_enrollment)
-    db.flush()
+    try:
+        existing = db.query(models.CourseEnrollment).filter(
+            models.CourseEnrollment.student_id == enrollment.student_id,
+            models.CourseEnrollment.course_id == enrollment.course_id
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Student already enrolled in this course")
+        
+        db_enrollment = models.CourseEnrollment(**enrollment.model_dump())
+        db.add(db_enrollment)
+        db.flush()
 
-    now = datetime.utcnow()
-    current_month = now.strftime("%B")
-    last_day = calendar.monthrange(now.year, now.month)[1]
-    due_date = now.replace(day=last_day).strftime("%Y-%m-%d")
+        now = datetime.utcnow()
+        current_month = now.strftime("%B")
+        last_day = calendar.monthrange(now.year, now.month)[1]
+        due_date = now.replace(day=last_day).strftime("%Y-%m-%d")
 
-    existing_payment = db.query(models.Payment).filter(
-        models.Payment.student_id == enrollment.student_id,
-        models.Payment.course_id == enrollment.course_id,
-        models.Payment.month == current_month,
-    ).first()
+        existing_payment = db.query(models.Payment).filter(
+            models.Payment.student_id == enrollment.student_id,
+            models.Payment.course_id == enrollment.course_id,
+            models.Payment.month == current_month,
+        ).first()
 
-    if not existing_payment:
-        course = db.query(models.Course).filter(models.Course.id == enrollment.course_id).first()
-        db.add(models.Payment(
-            student_id=enrollment.student_id,
-            course_id=enrollment.course_id,
-            amount=course.price if course else 0,
-            currency="USD",
-            status="pending",
-            due_date=due_date,
-            month=current_month,
-        ))
+        if not existing_payment:
+            course = db.query(models.Course).filter(models.Course.id == enrollment.course_id).first()
+            db.add(models.Payment(
+                student_id=enrollment.student_id,
+                course_id=enrollment.course_id,
+                amount=course.price if course else 0,
+                currency="USD",
+                status="pending",
+                due_date=due_date,
+                month=current_month,
+            ))
 
-    db.commit()
-    db.refresh(db_enrollment)
-    return db_enrollment
+        db.commit()
+        db.refresh(db_enrollment)
+        return db_enrollment
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"[ERROR] create_enrollment failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Enrollment creation failed: {str(e)}")
 
 @app.delete("/enrollments/{student_id}/{course_id}")
 def delete_enrollment(student_id: int, course_id: int, db: Session = Depends(get_db)):
