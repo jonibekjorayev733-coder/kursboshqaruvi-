@@ -155,14 +155,8 @@ def sync_notification_id_sequence(db: Session):
 
 @app.on_event("startup")
 def startup_schema_compatibility():
-    """Sync all table sequences on startup to avoid duplicate key errors"""
-    try:
-        with engine.begin() as conn:
-            sync_critical_sequences_with_connection(conn)
-            ensure_legacy_schema_compatibility()
-        print("[INFO] Database schema initialized successfully")
-    except Exception as e:
-        print(f"[WARNING] Schema startup issue: {e}")
+    """Keep startup non-blocking so Render can detect an open port quickly."""
+    pass
 
 
 ALLOWED_ASSIGNMENT_STATUSES = {"accepted", "in_progress", "completed"}
@@ -324,6 +318,9 @@ def delete_course(course_id: int, db: Session = Depends(get_db)):
 @app.post("/enrollments/")
 def create_enrollment(enrollment: schemas.CourseEnrollmentCreate, db: Session = Depends(get_db)):
     try:
+        sync_table_id_sequence(db, "course_enrollment")
+        sync_table_id_sequence(db, "payment")
+
         existing = db.query(models.CourseEnrollment).filter(
             models.CourseEnrollment.student_id == enrollment.student_id,
             models.CourseEnrollment.course_id == enrollment.course_id
