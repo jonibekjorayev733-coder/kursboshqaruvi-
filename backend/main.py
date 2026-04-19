@@ -1,13 +1,15 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Header
+from fastapi import FastAPI, Depends, HTTPException, status, Header, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from typing import List, Optional
+from typing import List, Optional, Dict, Set
 from datetime import datetime
 import asyncio
 import calendar
 import os
+import json
+import urllib.request
 
 try:
     import models, schemas
@@ -46,6 +48,99 @@ app.add_middleware(
     allow_headers=["*"],
     allow_origin_regex=r"(https?://(localhost|127\.0\.0\.1)(:\d+)?$)|(https://[a-zA-Z0-9\-]+\.onrender\.com$)",
 )
+
+
+class NotificationConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[int, Set[WebSocket]] = {}
+
+    async def connect(self, user_id: int, websocket: WebSocket):
+        await websocket.accept()
+        user_connections = self.active_connections.setdefault(user_id, set())
+        user_connections.add(websocket)
+
+    def disconnect(self, user_id: int, websocket: WebSocket):
+        user_connections = self.active_connections.get(user_id)
+        if not user_connections:
+            return
+        user_connections.discard(websocket)
+        if not user_connections:
+            self.active_connections.pop(user_id, None)
+
+    def is_online(self, user_id: int) -> bool:
+        user_connections = self.active_connections.get(user_id)
+        return bool(user_connections)
+
+    async def broadcast_to_user(self, user_id: int, payload: dict):
+        user_connections = self.active_connections.get(user_id)
+        if not user_connections:
+            return
+
+        disconnected: List[WebSocket] = []
+        for connection in list(user_connections):
+            try:
+                await connection.send_json(payload)
+            except Exception:
+                disconnected.append(connection)
+
+        for connection in disconnected:
+            self.disconnect(user_id, connection)
+
+
+notification_manager = NotificationConnectionManager()
+
+
+def notification_to_payload(notification: models.Notification) -> dict:
+    created_at_value = notification.created_at.isoformat() if notification.created_at else None
+    return {
+        "event": "notification.created",
+        "notification": {
+            "id": notification.id,
+            "user_id": notification.user_id,
+            "title": notification.title,
+            "message": notification.message,
+            "type": notification.type,
+            "assignment_id": notification.assignment_id,
+            "read": notification.read,
+            "created_at": created_at_value,
+        },
+    }
+
+
+def send_sms_via_webhook(phone: Optional[str], message: str) -> bool:
+    if not phone:
+        return False
+
+    sms_api_url = os.getenv("SMS_API_URL", "").strip()
+    sms_api_token = os.getenv("SMS_API_TOKEN", "").strip()
+
+    if not sms_api_url:
+        return False
+
+    payload = json.dumps({"phone": phone, "message": message}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if sms_api_token:
+        headers["Authorization"] = f"Bearer {sms_api_token}"
+
+    try:
+        request = urllib.request.Request(sms_api_url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=8) as response:
+            return 200 <= response.status < 300
+    except Exception as exc:
+        print(f"[WARNING] SMS webhook send failed: {exc}")
+        return False
+
+
+@app.websocket("/ws/notifications/{user_id}")
+async def notifications_ws(websocket: WebSocket, user_id: int):
+    await notification_manager.connect(user_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        notification_manager.disconnect(user_id, websocket)
+    except Exception:
+        notification_manager.disconnect(user_id, websocket)
 
 # Initialize test data on startup
 # Data already initialized via init_db.py
@@ -316,7 +411,7 @@ def delete_course(course_id: int, db: Session = Depends(get_db)):
 
 # Course Enrollments
 @app.post("/enrollments/")
-def create_enrollment(enrollment: schemas.CourseEnrollmentCreate, db: Session = Depends(get_db)):
+async def create_enrollment(enrollment: schemas.CourseEnrollmentCreate, db: Session = Depends(get_db)):
     try:
         sync_table_id_sequence(db, "course_enrollment")
         sync_table_id_sequence(db, "payment")
@@ -343,8 +438,9 @@ def create_enrollment(enrollment: schemas.CourseEnrollmentCreate, db: Session = 
             models.Payment.month == current_month,
         ).first()
 
+        course = db.query(models.Course).filter(models.Course.id == enrollment.course_id).first()
+
         if not existing_payment:
-            course = db.query(models.Course).filter(models.Course.id == enrollment.course_id).first()
             db.add(models.Payment(
                 student_id=enrollment.student_id,
                 course_id=enrollment.course_id,
@@ -355,8 +451,35 @@ def create_enrollment(enrollment: schemas.CourseEnrollmentCreate, db: Session = 
                 month=current_month,
             ))
 
+        student = db.query(models.Student).filter(models.Student.id == enrollment.student_id).first()
+        course_name = course.name if course else f"Kurs #{enrollment.course_id}"
+        student_name = student.name if student else f"Student #{enrollment.student_id}"
+        notification_message = f"Siz {course_name} guruhiga qo'shildingiz. Admin: dars jadvali va vazifalarni tekshiring."
+
+        sync_notification_id_sequence(db)
+        db_notification = models.Notification(
+            user_id=enrollment.student_id,
+            title="📚 Guruhga qo'shildingiz",
+            message=notification_message,
+            type="enrollment_added",
+        )
+        db.add(db_notification)
+
         db.commit()
         db.refresh(db_enrollment)
+        db.refresh(db_notification)
+
+        await notification_manager.broadcast_to_user(
+            enrollment.student_id,
+            notification_to_payload(db_notification),
+        )
+
+        if not notification_manager.is_online(enrollment.student_id):
+            send_sms_via_webhook(
+                student.phone if student else None,
+                f"{student_name}, {notification_message}",
+            )
+
         return db_enrollment
     except HTTPException:
         raise
@@ -1199,11 +1322,22 @@ def read_notifications(user_id: Optional[int] = None, db: Session = Depends(get_
     return query.order_by(models.Notification.created_at.desc()).all()
 
 @app.post("/notifications/", response_model=schemas.Notification)
-def create_notification(notification: schemas.NotificationCreate, db: Session = Depends(get_db)):
+async def create_notification(notification: schemas.NotificationCreate, db: Session = Depends(get_db)):
+    sync_notification_id_sequence(db)
     db_n = models.Notification(**notification.model_dump())
     db.add(db_n)
     db.commit()
     db.refresh(db_n)
+
+    await notification_manager.broadcast_to_user(
+        db_n.user_id,
+        notification_to_payload(db_n),
+    )
+
+    if not notification_manager.is_online(db_n.user_id):
+        student = db.query(models.Student).filter(models.Student.id == db_n.user_id).first()
+        send_sms_via_webhook(student.phone if student else None, db_n.message)
+
     return db_n
 
 @app.put("/notifications/{notification_id}/read")

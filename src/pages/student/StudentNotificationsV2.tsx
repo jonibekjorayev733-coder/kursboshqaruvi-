@@ -3,11 +3,11 @@ import { motion } from 'framer-motion';
 import { Bell, CheckCircle2, Circle, Clock3, CreditCard, Send } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { api, type Assignment, type Notification } from '@/services/api';
+import { api, connectNotificationSocket, type Assignment, type Notification } from '@/services/api';
 import { toast } from 'sonner';
 
 const paymentTypes = new Set(['payment_paid', 'payment_received', 'payment_reminder']);
-const assignmentTypes = new Set(['assignment_created', 'assignment_updated', 'assignment_deleted']);
+const assignmentTypes = new Set(['assignment_created', 'assignment_updated', 'assignment_deleted', 'enrollment_added']);
 
 type TaskTab = 'payments' | 'tasks';
 type TaskStatus = 'accepted' | 'in_progress' | 'completed';
@@ -70,6 +70,51 @@ export default function StudentNotificationsV2() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (!studentId) {
+      return;
+    }
+
+    let reconnectTimeoutId: number | null = null;
+    let socketController: { close: () => void } | null = null;
+    let unmounted = false;
+
+    const connect = () => {
+      if (unmounted) {
+        return;
+      }
+
+      socketController = connectNotificationSocket(
+        studentId,
+        (notification) => {
+          setNotifications((prev) => {
+            const exists = prev.some((item) => item.id === notification.id);
+            if (exists) {
+              return prev;
+            }
+            return [notification, ...prev];
+          });
+          toast.success(`SMS: ${notification.title}`);
+        },
+        (connected) => {
+          if (!connected && !unmounted) {
+            reconnectTimeoutId = window.setTimeout(connect, 2500);
+          }
+        },
+      );
+    };
+
+    connect();
+
+    return () => {
+      unmounted = true;
+      if (reconnectTimeoutId !== null) {
+        window.clearTimeout(reconnectTimeoutId);
+      }
+      socketController?.close();
+    };
+  }, [studentId]);
 
   const paymentNotifications = useMemo(
     () => notifications.filter((n) => paymentTypes.has(n.type)),

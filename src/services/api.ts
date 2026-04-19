@@ -10,6 +10,7 @@ const fallbackApiUrl = isRenderHost
     : `http://${DEFAULT_API_HOST}:8001`;
 
 export const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? fallbackApiUrl;
+export const WS_API_URL = API_URL.replace(/^http/, 'ws');
 export const BACKEND_STATUS_EVENT = 'edugrow-backend-status-change';
 
 type BackendStatusDetail = { isDown: boolean };
@@ -130,7 +131,7 @@ export interface Notification {
     user_id: number;
     title: string;
     message: string;
-    type: 'assignment_created' | 'assignment_updated' | 'assignment_deleted' | 'assignment_submitted' | 'payment_paid' | 'payment_received' | 'payment_reminder' | 'assignment_status_accepted' | 'assignment_status_in_progress' | 'assignment_status_completed';
+    type: 'assignment_created' | 'assignment_updated' | 'assignment_deleted' | 'assignment_submitted' | 'payment_paid' | 'payment_received' | 'payment_reminder' | 'assignment_status_accepted' | 'assignment_status_in_progress' | 'assignment_status_completed' | 'enrollment_added';
     assignment_id?: number;
     read?: boolean;
     created_at?: string;
@@ -171,6 +172,57 @@ export interface TeacherTaskNotificationFeed {
     in_progress: TeacherTaskNotificationItem[];
     completed: TeacherTaskNotificationItem[];
 }
+
+export type NotificationSocketEvent = {
+    event: 'notification.created';
+    notification: Notification;
+};
+
+export const connectNotificationSocket = (
+    userId: number,
+    onNotification: (notification: Notification) => void,
+    onConnectionStateChange?: (connected: boolean) => void,
+) => {
+    const socket = new WebSocket(`${WS_API_URL}/ws/notifications/${userId}`);
+
+    socket.onopen = () => {
+        onConnectionStateChange?.(true);
+    };
+
+    socket.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data) as NotificationSocketEvent;
+            if (data?.event === 'notification.created' && data.notification) {
+                onNotification(data.notification);
+            }
+        } catch {
+            // Ignore malformed socket events
+        }
+    };
+
+    socket.onclose = () => {
+        onConnectionStateChange?.(false);
+    };
+
+    socket.onerror = () => {
+        onConnectionStateChange?.(false);
+    };
+
+    const heartbeat = window.setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+            socket.send('ping');
+        }
+    }, 25000);
+
+    return {
+        close: () => {
+            window.clearInterval(heartbeat);
+            if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+                socket.close();
+            }
+        },
+    };
+};
 
 export interface LoginRequest {
     email: string;
