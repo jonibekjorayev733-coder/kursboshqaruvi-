@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAppContext } from '@/contexts/AppContext';
 import {
   FaReact, FaPython, FaRocket, FaMobile, FaChevronRight,
   FaBarsStaggered, FaXmark, FaEnvelope, FaLock, FaUser,
@@ -6,6 +7,7 @@ import {
 } from 'react-icons/fa6';
 
 export default function Home() {
+  const { theme } = useAppContext();
   const [scrolled, setScrolled] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [authModal, setAuthModal] = useState({ open: false, mode: 'login' });
