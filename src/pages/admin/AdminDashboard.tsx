@@ -36,12 +36,12 @@ export default function AdminDashboard() {
   const allPayments = data?.payments ?? [];
   const courseEnrollments = data?.courseEnrollments ?? {};
 
+  const totalRevenue = useMemo(() => allPayments.filter(p => p.status === 'paid').reduce((s, p) => s + p.amount, 0), [allPayments]);
+  const unpaidTotal = useMemo(() => allPayments.filter(p => p.status !== 'paid').reduce((s, p) => s + p.amount, 0), [allPayments]);
+
   if (isLoading) {
     return <div className="p-10 opacity-50 flex items-center justify-center text-white">{t('status.loading')}</div>;
   }
-
-  const totalRevenue = useMemo(() => allPayments.filter(p => p.status === 'paid').reduce((s, p) => s + p.amount, 0), [allPayments]);
-  const unpaidTotal = useMemo(() => allPayments.filter(p => p.status !== 'paid').reduce((s, p) => s + p.amount, 0), [allPayments]);
 
   const revenueChart = {
     labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
