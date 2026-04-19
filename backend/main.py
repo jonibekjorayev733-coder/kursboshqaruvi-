@@ -8,10 +8,10 @@ from datetime import datetime
 import asyncio
 import calendar
 
-from . import models, schemas
-from .database import engine, get_db
-from .auth import hash_password, verify_password, create_access_token, decode_access_token
-from .payment_gateways import PaymentProcessor, StripePaymentService
+import models, schemas
+from database import engine, get_db
+from auth import hash_password, verify_password, create_access_token, decode_access_token
+from payment_gateways import PaymentProcessor, StripePaymentService
 
 # Create tables
 # models.Base.metadata.create_all(bind=engine)
@@ -904,7 +904,7 @@ def confirm_stripe_payment(
         type="payment_paid"
     ))
     # Notify all admins
-    from .models import Admin
+    from models import Admin
     for adm in db.query(Admin).all():
         db.add(models.Notification(
             user_id=adm.id,
@@ -936,7 +936,7 @@ async def create_click_invoice(
         raise HTTPException(status_code=404, detail="Student or course not found")
     
     # Create Click invoice
-    from .payment_gateways import ClickPaymentService
+    from payment_gateways import ClickPaymentService
     result = await ClickPaymentService.create_invoice(
         payload.amount,
         payload.student_id,
@@ -962,7 +962,7 @@ async def verify_click_payment(
     db: Session = Depends(get_db)
 ):
     """Verify Click payment status"""
-    from .payment_gateways import ClickPaymentService
+    from payment_gateways import ClickPaymentService
     
     result = await ClickPaymentService.verify_payment(payload.transaction_id)
     
@@ -1017,7 +1017,7 @@ async def verify_click_payment(
             message=f"{course_name} kursi uchun ${payment.amount} to'lov Click orqali qabul qilindi. Sana: {paid_time}",
             type="payment_paid"
         ))
-        from .models import Admin
+        from models import Admin
         for adm in db.query(Admin).all():
             db.add(models.Notification(
                 user_id=adm.id,
@@ -1054,7 +1054,7 @@ async def create_payme_receipt(
         raise HTTPException(status_code=404, detail="Student or course not found")
     
     # Create Payme receipt
-    from .payment_gateways import PaymePaymentService
+    from payment_gateways import PaymePaymentService
     result = await PaymePaymentService.create_receipt(
         payload.amount,
         payload.student_id,
@@ -1080,7 +1080,7 @@ async def check_payme_status(
     db: Session = Depends(get_db)
 ):
     """Check Payme payment status"""
-    from .payment_gateways import PaymePaymentService
+    from payment_gateways import PaymePaymentService
     
     result = await PaymePaymentService.get_payment_status(payload.receipt_id)
     
@@ -1135,7 +1135,7 @@ async def check_payme_status(
             message=f"{course_name} kursi uchun ${payment.amount} to'lov Payme orqali qabul qilindi. Sana: {paid_time}",
             type="payment_paid"
         ))
-        from .models import Admin
+        from models import Admin
         for adm in db.query(Admin).all():
             db.add(models.Notification(
                 user_id=adm.id,
@@ -1161,7 +1161,7 @@ async def check_payme_status(
 @app.get("/payments/real/google-pay/config")
 def get_google_pay_config(student_id: int, course_id: int):
     """Get Google Pay configuration for mobile payments"""
-    from .payment_gateways import GooglePayService
+    from payment_gateways import GooglePayService
     
     # This would be called from mobile app to get payment config
     # Amount would come from database query in real implementation
