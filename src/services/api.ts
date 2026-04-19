@@ -3,7 +3,13 @@ const DEFAULT_API_HOST = typeof window !== 'undefined'
         ? '127.0.0.1'
         : window.location.hostname)
     : '127.0.0.1';
-export const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? `http://${DEFAULT_API_HOST}:8001`;
+
+const isRenderHost = typeof window !== 'undefined' && window.location.hostname.endsWith('onrender.com');
+const fallbackApiUrl = isRenderHost
+    ? 'https://kursboshqaruvi-backend.onrender.com'
+    : `http://${DEFAULT_API_HOST}:8001`;
+
+export const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? fallbackApiUrl;
 export const BACKEND_STATUS_EVENT = 'edugrow-backend-status-change';
 
 type BackendStatusDetail = { isDown: boolean };

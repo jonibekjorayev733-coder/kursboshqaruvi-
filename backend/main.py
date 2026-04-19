@@ -7,6 +7,7 @@ from typing import List, Optional
 from datetime import datetime
 import asyncio
 import calendar
+import os
 
 try:
     import models, schemas
@@ -25,12 +26,16 @@ except ImportError:
 app = FastAPI(title="EduGrow Platform API")
 
 # Configure CORS
-allowed_origins = [
+default_allowed_origins = [
     "http://localhost:8080",
     "http://127.0.0.1:8080",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
+
+env_allowed_origins_raw = os.getenv("CORS_ORIGINS", "")
+env_allowed_origins = [origin.strip() for origin in env_allowed_origins_raw.split(",") if origin.strip()]
+allowed_origins = list(dict.fromkeys(default_allowed_origins + env_allowed_origins))
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,7 +43,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origin_regex=r"(https?://(localhost|127\.0\.0\.1)(:\d+)?$)|(https://[a-zA-Z0-9\-]+\.onrender\.com$)",
 )
 
 # Initialize test data on startup
