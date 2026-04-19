@@ -197,7 +197,8 @@ function App() {
       const button = target.closest('button') as HTMLButtonElement | null;
       if (!button || button.disabled) return;
 
-      const path = window.location.pathname;
+      const hashPath = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+      const path = hashPath && hashPath.startsWith('/') ? hashPath : window.location.pathname;
       const isDashboardPath = path.startsWith('/admin') || path.startsWith('/teacher') || path.startsWith('/student');
       if (!isDashboardPath) return;
 

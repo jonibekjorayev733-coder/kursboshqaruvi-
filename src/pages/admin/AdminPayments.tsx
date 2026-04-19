@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DollarSign, CreditCard, AlertTriangle, CheckCircle2, Clock, Send, Download, TrendingUp, X, Mail, Phone, MessageCircle, CheckCheck } from 'lucide-react';
+import { DollarSign, AlertTriangle, CheckCircle2, Clock, Send, Download, TrendingUp, X, Mail, Phone, MessageCircle, CheckCheck, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, connectRealtimeChannel } from '../../services/api';
 
@@ -41,6 +41,13 @@ export default function AdminPayments() {
   const [sendingId, setSendingId] = useState<number | null>(null);
   const [selectedPaymentIds, setSelectedPaymentIds] = useState<Set<number>>(new Set());
   const [sendingBulk, setSendingBulk] = useState(false);
+  const [customReminderMessage, setCustomReminderMessage] = useState('');
+
+  const buildReminderTemplate = (payment: Payment) => {
+    const studentName = payment.student?.name || payment.student_name || 'O\'quvchi';
+    const courseName = payment.course_name || `Kurs #${payment.course_id}`;
+    return `Assalomu alaykum, ${studentName}. ${courseName} kursi uchun ${payment.month} oy to'lovi ($${payment.amount}) kutilmoqda. Iltimos, imkon qadar tezroq to'lovni amalga oshiring.`;
+  };
 
   useEffect(() => {
     fetchPayments();
@@ -166,20 +173,25 @@ export default function AdminPayments() {
   const handleReminder = async (paymentId: number) => {
     try {
       setSendingId(paymentId);
-      
-      // Call backend reminder endpoint (creates student notification)
-      await api.sendSMS(paymentId);
+
+      const trimmedMessage = customReminderMessage.trim();
+      if (trimmedMessage.length > 0) {
+        await api.sendBulkNotifications([paymentId], trimmedMessage);
+      } else {
+        await api.sendSMS(paymentId);
+      }
       
       // Update payment status
       setPayments(prev => prev.map(p => 
         p.id === paymentId ? { ...p, status: 'pending' } : p
       ));
       
-      toast.success('📱 Habarnomasla yuborildi');
+      toast.success('📱 Xabar yuborildi');
+      setCustomReminderMessage('');
       
     } catch (error) {
       console.error('Notification error:', error);
-      toast.error('Habarnomasla yuborishda xatolik');
+      toast.error(error instanceof Error ? error.message : 'Xabar yuborishda xatolik');
     } finally {
       setSendingId(null);
       setShowReminder(null);
@@ -389,7 +401,7 @@ export default function AdminPayments() {
               disabled={sendingBulk}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-black text-sm transition-all disabled:opacity-50"
             >
-              <MessageCircle className="w-4 h-4" />
+              {sendingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
               {sendingBulk ? 'Yuborilmoqda...' : `${selectedPaymentIds.size} ta Habarnomasla Yuborish`}
             </motion.button>
           )}
@@ -475,10 +487,11 @@ export default function AdminPayments() {
                               whileHover={{ scale: 1.05 }}
                               whileTap={{ scale: 0.95 }}
                               onClick={() => handleReminder(payment.id)}
+                              disabled={sendingId === payment.id}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600/20 text-amber-400 hover:bg-amber-600/40 text-xs font-black transition-all"
                             >
-                              <Send className="w-3 h-3" />
-                              Eslatma
+                              {sendingId === payment.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                              {sendingId === payment.id ? 'Yuborilmoqda...' : 'Eslatma'}
                             </motion.button>
                           )}
                           {payment.status === 'paid' && (
@@ -659,27 +672,38 @@ export default function AdminPayments() {
 
                 {/* SEND NOTIFICATION BUTTON */}
                 {selectedPayment.status !== 'paid' && (
-                  <motion.button
-                    whileHover={{ y: -2 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => handleReminder(selectedPayment.id)}
-                    disabled={sendingId === selectedPayment.id}
-                    className="w-full py-4 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 text-white font-black uppercase text-sm flex items-center justify-center gap-2 hover:shadow-lg disabled:opacity-50 transition-all"
-                  >
-                    {sendingId === selectedPayment.id ? (
-                      <>
-                        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }}>
+                  <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-orange-500/10 p-4 space-y-3">
+                    <div className="flex items-center gap-2 text-amber-300">
+                      <Sparkles className="w-4 h-4" />
+                      <p className="text-xs font-black uppercase tracking-wider">Xabar yuborish markazi</p>
+                    </div>
+                    <textarea
+                      value={customReminderMessage}
+                      onChange={(e) => setCustomReminderMessage(e.target.value)}
+                      placeholder={buildReminderTemplate(selectedPayment)}
+                      className="min-h-[116px] w-full rounded-xl border border-slate-600/60 bg-slate-900/70 p-3 text-sm text-white outline-none focus:border-amber-500/60"
+                    />
+                    <p className="text-[11px] text-slate-400">Matn bo'sh bo'lsa avtomatik xabar yuboriladi.</p>
+                    <motion.button
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => handleReminder(selectedPayment.id)}
+                      disabled={sendingId === selectedPayment.id}
+                      className="w-full py-4 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 text-white font-black uppercase text-sm flex items-center justify-center gap-2 hover:shadow-lg disabled:opacity-50 transition-all"
+                    >
+                      {sendingId === selectedPayment.id ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Xabar yuborilmoqda...
+                        </>
+                      ) : (
+                        <>
                           <Send className="w-4 h-4" />
-                        </motion.div>
-                        Habarnoma yuborilmoqda...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="w-4 h-4" />
-                        Habarnoma Yubor
-                      </>
-                    )}
-                  </motion.button>
+                          Xabar yuborish
+                        </>
+                      )}
+                    </motion.button>
+                  </motion.div>
                 )}
 
                 {selectedPayment.status === 'paid' && (
@@ -694,7 +718,7 @@ export default function AdminPayments() {
                   <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="rounded-lg bg-slate-700/50 border border-slate-600/50 p-3">
                     <p className="text-xs text-slate-400 font-black mb-2">HABARNOMA MATNI:</p>
                     <p className="text-sm text-white p-2 bg-slate-800/50 rounded border border-slate-600/50 font-mono">
-                      "Assalomu Alaikum! {selectedPayment.student?.name || 'O\'quvchi'}! Sizning {selectedPayment.course_name} kursiga {selectedPayment.month} oyin uchun to'lovingiz qolgan: ${selectedPayment.amount}. Iltimos, tezroq to'lovni qiling. Raxmat!"
+                      {customReminderMessage.trim() || buildReminderTemplate(selectedPayment)}
                     </p>
                   </motion.div>
                 )}

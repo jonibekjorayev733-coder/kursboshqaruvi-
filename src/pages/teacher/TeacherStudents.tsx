@@ -105,24 +105,41 @@ export default function TeacherStudents() {
 
     try {
       setIsAddingStudents(true);
-      console.log('[LOG] Creating enrollments for', selectedStudents.size, 'students');
       const courseId = selectedCourse.id as number;
-      
-      // Create enrollment for each selected student
-      for (const studentId of selectedStudents) {
+
+      const selectedIds = Array.from(selectedStudents);
+      let addedCount = 0;
+      let alreadyEnrolledCount = 0;
+      let failedCount = 0;
+
+      for (const studentId of selectedIds) {
         try {
           await api.createEnrollment(studentId, courseId);
-          console.log('[LOG] Student', studentId, 'enrolled successfully');
+          addedCount += 1;
         } catch (err) {
-          console.error('Error enrolling student', studentId, ':', err);
+          const message = err instanceof Error ? err.message.toLowerCase() : '';
+          if (message.includes('already enrolled')) {
+            alreadyEnrolledCount += 1;
+          } else {
+            failedCount += 1;
+            console.error('Error enrolling student', studentId, ':', err);
+          }
         }
       }
-      
-      // Reload enrollments
+
       await loadEnrollments(courseId);
       setSelectedStudents(new Set());
       setSelectAll(false);
-      toast.success(`${selectedStudents.size} ta o'quvchi qo'shildi`);
+
+      if (addedCount > 0) {
+        toast.success(`${addedCount} ta o'quvchi qo'shildi`);
+      }
+      if (alreadyEnrolledCount > 0) {
+        toast.info(`${alreadyEnrolledCount} ta o'quvchi avval qo'shilgan`);
+      }
+      if (failedCount > 0) {
+        toast.error(`${failedCount} ta o'quvchini qo'shishda xatolik yuz berdi`);
+      }
     } catch (e) {
       console.error('Error adding students:', e);
       toast.error('Xatolik yuz berdi');

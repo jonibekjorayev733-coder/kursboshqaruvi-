@@ -379,8 +379,19 @@ export const api = {
             body: JSON.stringify({ student_id: studentId, course_id: courseId }),
         });
         if (!response.ok) {
-            const error = await response.text();
-            throw new Error(error);
+            let errorMessage = 'Failed to create enrollment';
+            try {
+                const body = await response.json();
+                if (body?.detail) {
+                    errorMessage = String(body.detail);
+                }
+            } catch {
+                const raw = await response.text();
+                if (raw) {
+                    errorMessage = raw;
+                }
+            }
+            throw new Error(errorMessage);
         }
         return response.json();
     },
@@ -626,11 +637,34 @@ export const api = {
     },
 
     async sendSMS(paymentId: number): Promise<any> {
-        const response = await fetch(`${API_URL}/payments/${paymentId}/send-sms`, {
+        let response = await fetch(`${API_URL}/payments/${paymentId}/send-sms`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
         });
-        if (!response.ok) throw new Error('Failed to send SMS');
+
+        if (response.status === 404) {
+            response = await fetch(`${API_URL}/payments/send-bulk-notification`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ payment_ids: [paymentId], message_override: null }),
+            });
+        }
+
+        if (!response.ok) {
+            let errorMessage = 'Failed to send SMS';
+            try {
+                const body = await response.json();
+                if (body?.detail) {
+                    errorMessage = String(body.detail);
+                }
+            } catch {
+                const raw = await response.text();
+                if (raw) {
+                    errorMessage = raw;
+                }
+            }
+            throw new Error(errorMessage);
+        }
         return response.json();
     },
 
