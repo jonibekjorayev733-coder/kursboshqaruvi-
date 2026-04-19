@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { api, Course, Student } from '@/services/api';
-import { Users, Plus, Trash2, CheckCircle, Circle, Search, Filter } from 'lucide-react';
+import { Users, Plus, Trash2, CheckCircle, Circle, Search, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function TeacherStudents() {
@@ -13,17 +13,24 @@ export default function TeacherStudents() {
   const [selectedStudents, setSelectedStudents] = useState<Set<number>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isAddingStudents, setIsAddingStudents] = useState(false);
+  const [removingStudentId, setRemovingStudentId] = useState<number | null>(null);
   const userId = localStorage.getItem('user_id');
+  const teacherId = userId ? parseInt(userId, 10) : NaN;
 
   useEffect(() => {
-    Promise.all([api.getCourses(), api.getStudents()])
+    if (Number.isNaN(teacherId) || teacherId <= 0) {
+      setLoading(false);
+      return;
+    }
+
+    Promise.all([api.getCourses(teacherId), api.getStudents()])
       .then(([c, s]) => {
-        const teacherCourses = c.filter((course: any) => course.teacher_id?.toString() === userId);
-        setCourses(teacherCourses);
+        setCourses(c);
         setStudents(s);
-        if (teacherCourses.length > 0) {
-          setSelectedCourse(teacherCourses[0]);
-          loadEnrollments(teacherCourses[0].id as number);
+        if (c.length > 0) {
+          setSelectedCourse(c[0]);
+          loadEnrollments(c[0].id as number);
         }
       })
       .catch(e => {
@@ -31,7 +38,7 @@ export default function TeacherStudents() {
         toast.error('Ma\'lumot yuklashda xatolik');
       })
       .finally(() => setLoading(false));
-  }, [userId]);
+  }, [teacherId]);
 
   useEffect(() => {
     const handleRealtime = (event: Event) => {
@@ -97,6 +104,7 @@ export default function TeacherStudents() {
     }
 
     try {
+      setIsAddingStudents(true);
       console.log('[LOG] Creating enrollments for', selectedStudents.size, 'students');
       const courseId = selectedCourse.id as number;
       
@@ -118,6 +126,8 @@ export default function TeacherStudents() {
     } catch (e) {
       console.error('Error adding students:', e);
       toast.error('Xatolik yuz berdi');
+    } finally {
+      setIsAddingStudents(false);
     }
   };
 
@@ -125,6 +135,7 @@ export default function TeacherStudents() {
     if (!selectedCourse) return;
 
     try {
+      setRemovingStudentId(studentId);
       console.log('[LOG] Deleting enrollment for student', studentId);
       const courseId = selectedCourse.id as number;
       await api.deleteEnrollment(studentId, courseId);
@@ -135,6 +146,8 @@ export default function TeacherStudents() {
     } catch (e) {
       console.error('Error removing student:', e);
       toast.error('Xatolik yuz berdi');
+    } finally {
+      setRemovingStudentId(null);
     }
   };
 
@@ -144,7 +157,7 @@ export default function TeacherStudents() {
     <motion.div initial="hidden" animate="visible" variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } }} className="space-y-6 sm:space-y-8">
       
       {/* PREMIUM HEADER */}
-      <motion.div variants={{ hidden: { opacity: 0, y: -20 }, visible: { opacity: 1, y: 0 } }} className="relative overflow-hidden rounded-2xl sm:rounded-3xl p-5 sm:p-8 md:p-12 bg-gradient-to-br from-purple-600 via-pink-500 to-red-500 shadow-2xl">
+      <motion.div variants={{ hidden: { opacity: 0, y: -20 }, visible: { opacity: 1, y: 0 } }} className="relative overflow-hidden rounded-2xl sm:rounded-3xl p-5 sm:p-8 md:p-12 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 border border-blue-500/30 shadow-[0_20px_60px_-20px_rgba(59,130,246,0.6)]">
         <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
         <div className="relative z-10">
           <div className="flex items-start sm:items-center justify-between gap-4">
@@ -264,10 +277,10 @@ export default function TeacherStudents() {
                   whileHover={{ y: -2 }}
                   whileTap={{ scale: 0.95 }}
                   className="w-full px-6 py-3.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 text-white text-sm sm:text-base font-black hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                  disabled={selectedStudents.size === 0}
+                  disabled={selectedStudents.size === 0 || isAddingStudents}
                 >
-                  <Plus className="w-4 h-4" />
-                  Qo'shish ({selectedStudents.size})
+                  {isAddingStudents ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  {isAddingStudents ? 'Qo\'shilmoqda...' : `Qo'shish (${selectedStudents.size})`}
                 </motion.button>
               </div>
             )}
@@ -304,9 +317,10 @@ export default function TeacherStudents() {
                         whileHover={{ scale: 1.1 }}
                         whileTap={{ scale: 0.95 }}
                         onClick={() => handleRemoveStudent(student.id as number)}
+                        disabled={removingStudentId === (student.id as number)}
                         className="p-2.5 rounded-lg hover:bg-red-500/20 text-red-400 transition-colors flex-shrink-0"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        {removingStudentId === (student.id as number) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                       </motion.button>
                     </div>
                   </motion.div>

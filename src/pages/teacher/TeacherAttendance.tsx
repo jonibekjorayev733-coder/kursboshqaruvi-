@@ -29,6 +29,7 @@ export default function TeacherAttendance() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'present' | 'absent' | 'late' | 'unmarked'>('all');
   const userId = localStorage.getItem('user_id');
+  const teacherId = userId ? parseInt(userId, 10) : NaN;
   const todayStr = new Date().toISOString().split('T')[0];
   const isPastDate = selectedDate < todayStr;
   const isTodayDate = selectedDate === todayStr;
@@ -36,20 +37,24 @@ export default function TeacherAttendance() {
   const canTakeAttendance = isTodayDate && !dateAlreadySaved;
 
   useEffect(() => {
-    Promise.all([api.getCourses(), api.getStudents(), api.getAttendance()])
+    if (Number.isNaN(teacherId) || teacherId <= 0) {
+      setLoading(false);
+      return;
+    }
+
+    Promise.all([api.getCourses(teacherId), api.getStudents(), api.getAttendance()])
       .then(([c, s, att]) => {
-        const teacherCourses = c.filter((course: any) => course.teacher_id?.toString() === userId);
-        setCourses(teacherCourses);
+        setCourses(c);
         setStudents(s);
         setAllAttendanceRecords(att);
-        if (teacherCourses.length > 0) {
-          setSelectedCourse(teacherCourses[0]);
-          loadEnrollments(teacherCourses[0].id as number);
+        if (c.length > 0) {
+          setSelectedCourse(c[0]);
+          loadEnrollments(c[0].id as number);
         }
       })
       .catch(() => toast.error("Ma'lumot yuklashda xatolik"))
       .finally(() => setLoading(false));
-  }, [userId]);
+  }, [teacherId]);
 
   const loadEnrollments = async (courseId: number) => {
     try {

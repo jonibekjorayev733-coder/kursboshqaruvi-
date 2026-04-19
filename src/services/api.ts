@@ -74,6 +74,41 @@ export const checkBackendConnection = async () => {
 
 const STUDENT_ENROLLMENTS_CACHE_TTL_MS = 20000;
 const studentEnrollmentsCache = new Map<number, { at: number; data: any[] }>();
+const API_GET_CACHE_TTL_MS = 12000;
+const apiGetCache = new Map<string, { at: number; data: unknown }>();
+const apiInFlight = new Map<string, Promise<unknown>>();
+
+const cachedGetJson = async <T>(url: string, ttlMs = API_GET_CACHE_TTL_MS): Promise<T> => {
+    const cacheKey = url;
+    const now = Date.now();
+    const cached = apiGetCache.get(cacheKey);
+    if (cached && now - cached.at < ttlMs) {
+        return cached.data as T;
+    }
+
+    const inFlight = apiInFlight.get(cacheKey);
+    if (inFlight) {
+        return inFlight as Promise<T>;
+    }
+
+    const request = (async () => {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+        }
+        const data = (await response.json()) as T;
+        apiGetCache.set(cacheKey, { at: Date.now(), data });
+        return data;
+    })();
+
+    apiInFlight.set(cacheKey, request as Promise<unknown>);
+
+    try {
+        return await request;
+    } finally {
+        apiInFlight.delete(cacheKey);
+    }
+};
 
 export interface Course {
     id?: number;
@@ -293,10 +328,14 @@ export interface LoginResponse {
 
 export const api = {
     // Courses
-    async getCourses(): Promise<Course[]> {
-        const response = await fetch(`${API_URL}/courses/`);
-        if (!response.ok) throw new Error('Failed to fetch courses');
-        return response.json();
+    async getCourses(teacherId?: number): Promise<Course[]> {
+        const params = new URLSearchParams();
+        if (teacherId !== undefined && !Number.isNaN(teacherId) && teacherId > 0) {
+            params.append('teacher_id', String(teacherId));
+        }
+
+        const suffix = params.toString() ? `?${params.toString()}` : '';
+        return cachedGetJson<Course[]>(`${API_URL}/courses/${suffix}`);
     },
 
     async getCourse(id: number): Promise<Course> {
@@ -354,9 +393,23 @@ export const api = {
     },
 
     async getEnrollments(courseId: number): Promise<any[]> {
-        const response = await fetch(`${API_URL}/enrollments/${courseId}`);
-        if (!response.ok) throw new Error('Failed to fetch enrollments');
-        return response.json();
+        return cachedGetJson<any[]>(`${API_URL}/enrollments/${courseId}`);
+    },
+
+    async getEnrollmentCounts(courseIds: number[]): Promise<Record<number, number>> {
+        if (courseIds.length === 0) {
+            return {};
+        }
+
+        const uniqueIds = Array.from(new Set(courseIds)).filter((id) => Number.isFinite(id));
+        const params = new URLSearchParams();
+        params.append('course_ids', uniqueIds.join(','));
+        const data = await cachedGetJson<Array<{ course_id: number; count: number }>>(`${API_URL}/enrollments/counts?${params.toString()}`);
+
+        return data.reduce<Record<number, number>>((acc, item) => {
+            acc[item.course_id] = item.count;
+            return acc;
+        }, {});
     },
 
     async getStudentEnrollments(studentId: number): Promise<any[]> {
@@ -366,23 +419,7 @@ export const api = {
             return cached.data;
         }
 
-        const coursesResponse = await fetch(`${API_URL}/courses/`);
-        if (!coursesResponse.ok) {
-            throw new Error('Failed to fetch student enrollments');
-        }
-
-        const courses = await coursesResponse.json();
-        const enrollmentsByCourse = await Promise.all(
-            courses.map(async (course: any) => {
-                const response = await fetch(`${API_URL}/enrollments/${course.id}`);
-                if (!response.ok) return [];
-                return response.json();
-            })
-        );
-
-        const data = enrollmentsByCourse
-            .flat()
-            .filter((enrollment: any) => enrollment.student_id === studentId);
+        const data = await cachedGetJson<any[]>(`${API_URL}/enrollments/student/${studentId}`, STUDENT_ENROLLMENTS_CACHE_TTL_MS);
 
         studentEnrollmentsCache.set(studentId, { at: now, data });
         return data;
@@ -390,9 +427,7 @@ export const api = {
 
     // Teachers
     async getTeachers(): Promise<Teacher[]> {
-        const response = await fetch(`${API_URL}/teachers/`);
-        if (!response.ok) throw new Error('Failed to fetch teachers');
-        return response.json();
+        return cachedGetJson<Teacher[]>(`${API_URL}/teachers/`);
     },
 
     async createTeacher(teacher: Teacher): Promise<Teacher> {
@@ -424,9 +459,7 @@ export const api = {
 
     // Students
     async getStudents(): Promise<Student[]> {
-        const response = await fetch(`${API_URL}/students/`);
-        if (!response.ok) throw new Error('Failed to fetch students');
-        return response.json();
+        return cachedGetJson<Student[]>(`${API_URL}/students/`);
     },
 
     async createStudent(student: Student): Promise<Student> {
@@ -498,9 +531,7 @@ export const api = {
         if (filters?.studentId !== undefined) params.append('student_id', String(filters.studentId));
         if (filters?.date) params.append('date', filters.date);
         const suffix = params.toString() ? `?${params.toString()}` : '';
-        const response = await fetch(`${API_URL}/attendance/${suffix}`);
-        if (!response.ok) throw new Error('Failed to fetch attendance');
-        return response.json();
+        return cachedGetJson<any[]>(`${API_URL}/attendance/${suffix}`);
     },
 
     async createAttendance(attendance: any): Promise<any> {
@@ -544,9 +575,7 @@ export const api = {
 
     // Performance
     async getPerformance(): Promise<any[]> {
-        const response = await fetch(`${API_URL}/performance/`);
-        if (!response.ok) throw new Error('Failed to fetch performance');
-        return response.json();
+        return cachedGetJson<any[]>(`${API_URL}/performance/`);
     },
 
     async createPerformance(performance: any): Promise<any> {
@@ -561,9 +590,7 @@ export const api = {
 
     // Payments
     async getPayments(): Promise<any[]> {
-        const response = await fetch(`${API_URL}/payments/`);
-        if (!response.ok) throw new Error('Failed to fetch payments');
-        return response.json();
+        return cachedGetJson<any[]>(`${API_URL}/payments/`);
     },
 
     async getStudentPayments(studentId: number): Promise<any[]> {
@@ -658,9 +685,7 @@ export const api = {
         if (teacherId) params.append('teacher_id', teacherId.toString());
         if (studentId) params.append('student_id', studentId.toString());
         const url = `${API_URL}/assignments/?${params.toString()}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('Failed to fetch assignments');
-        const data = await response.json();
+        const data = await cachedGetJson<any>(url, 8000);
         // Handle both array and object responses (from disabled endpoint)
         if (Array.isArray(data)) return data;
         if (data.assignments && Array.isArray(data.assignments)) return data.assignments;

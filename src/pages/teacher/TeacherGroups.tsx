@@ -12,9 +12,10 @@ export default function TeacherGroups() {
   const [loading, setLoading] = useState(true);
   const [selectedCourse, setSelectedCourse] = useState('');
   const [enrolledStudentIds, setEnrolledStudentIds] = useState<Set<number>>(new Set());
+  const teacherId = parseInt(localStorage.getItem('user_id') || '0', 10);
 
   useEffect(() => {
-    Promise.all([api.getCourses(), api.getStudents()]).then(([c, s]) => {
+    Promise.all([api.getCourses(teacherId), api.getStudents()]).then(([c, s]) => {
       setCourses(c);
       setStudents(s);
       if (c.length > 0) {
@@ -22,7 +23,7 @@ export default function TeacherGroups() {
         loadEnrollments(c[0].id as number);
       }
     }).finally(() => setLoading(false));
-  }, []);
+  }, [teacherId]);
 
   const loadEnrollments = async (courseId: number) => {
     try {

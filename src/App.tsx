@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -98,6 +98,14 @@ function ProtectedRoute({ children, requiredRole }: { children: JSX.Element; req
 
 function App() {
   const [backendDown, setBackendDown] = useState(false);
+  const toastRateLimitRef = useRef<Map<string, number>>(new Map());
+  const backendDownRef = useRef(false);
+  const useHashRouter = typeof window !== 'undefined' && window.location.hostname.endsWith('onrender.com');
+  const RouterImpl = useHashRouter ? HashRouter : BrowserRouter;
+
+  useEffect(() => {
+    backendDownRef.current = backendDown;
+  }, [backendDown]);
 
   useEffect(() => {
     checkBackendConnection();
@@ -137,7 +145,12 @@ function App() {
         channel,
         (event) => {
           window.dispatchEvent(new CustomEvent('edugrow-realtime-event', { detail: event }));
-          showBankSmsToast('Yangi xabar', prettyRealtimeText(event));
+          const now = Date.now();
+          const previousAt = toastRateLimitRef.current.get(event.event) ?? 0;
+          if (now - previousAt >= 2500) {
+            toastRateLimitRef.current.set(event.event, now);
+            showBankSmsToast('Yangi xabar', prettyRealtimeText(event));
+          }
         },
         (connected) => {
           if (!connected && !disposed) {
@@ -176,10 +189,43 @@ function App() {
     return () => document.removeEventListener('pointerdown', handlePointerDown, true);
   }, []);
 
+  useEffect(() => {
+    const handleClick = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+
+      const button = target.closest('button') as HTMLButtonElement | null;
+      if (!button || button.disabled) return;
+
+      const path = window.location.pathname;
+      const isDashboardPath = path.startsWith('/admin') || path.startsWith('/teacher') || path.startsWith('/student');
+      if (!isDashboardPath) return;
+
+      if (button.dataset.skipGlobalLoading === 'true') return;
+      if (button.classList.contains('btn-global-loading')) return;
+
+      button.classList.add('btn-global-loading');
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+
+      const isOffline = typeof navigator !== 'undefined' ? !navigator.onLine : false;
+      const lockMs = (isOffline || backendDownRef.current) ? 7000 : 2200;
+
+      window.setTimeout(() => {
+        button.classList.remove('btn-global-loading');
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+      }, lockMs);
+    };
+
+    document.addEventListener('click', handleClick, true);
+    return () => document.removeEventListener('click', handleClick, true);
+  }, []);
+
   return (
     <AppProvider>
       <LanguageProvider>
-        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <RouterImpl>
           <div className="flex flex-col min-h-screen bg-black">
             <Navbar />
             {backendDown && (
@@ -241,7 +287,7 @@ function App() {
             </main>
             <Toaster position="top-right" richColors closeButton duration={2800} />
           </div>
-        </Router>
+        </RouterImpl>
       </LanguageProvider>
     </AppProvider>
   )

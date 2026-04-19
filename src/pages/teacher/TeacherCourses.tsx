@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api, Course, Student, Assignment } from '@/services/api';
-import { BookOpen, ArrowLeft, Calendar, Users, Send, Check, UserCheck, Globe, Pencil, Trash2, Save, XCircle } from 'lucide-react';
+import { BookOpen, ArrowLeft, Calendar, Users, Send, Check, UserCheck, Globe, Pencil, Trash2, Save, XCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '@/components/shared/ConfirmModal';
 
@@ -33,15 +33,14 @@ export default function TeacherCourses() {
   const teacherId = parseInt(localStorage.getItem('user_id') || '0', 10);
 
   useEffect(() => {
-    Promise.all([api.getCourses(), api.getStudents()])
+    Promise.all([api.getCourses(teacherId), api.getStudents()])
       .then(([c, s]) => {
-        const teacherCourses = c.filter((course: any) => course.teacher_id?.toString() === teacherId.toString());
-        setCourses(teacherCourses);
+        setCourses(c);
         setStudents(s);
       })
       .catch(() => toast.error('Kurslarni yuklashda xatolik'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [teacherId]);
 
   const loadEnrollments = async (courseId: number) => {
     try {
@@ -182,7 +181,7 @@ export default function TeacherCourses() {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
 
-      <div className="relative overflow-hidden rounded-3xl p-8 bg-gradient-to-br from-blue-600 via-cyan-500 to-teal-500 shadow-2xl">
+      <div className="relative overflow-hidden rounded-3xl p-8 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 border border-blue-500/30 shadow-[0_20px_60px_-20px_rgba(59,130,246,0.6)]">
         <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
         <div className="relative z-10 flex items-center justify-between">
           <div>
@@ -271,7 +270,7 @@ export default function TeacherCourses() {
                   <motion.button whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }} onClick={handleSendAll}
                     disabled={isSubmitting || !allTitle.trim() || !allTask.trim()}
                     className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-blue-500/30 transition-all disabled:opacity-50">
-                    <Send className="w-5 h-5" />
+                    {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                     {isSubmitting ? 'Yuborilmoqda...' : `Hammaga Yuborish (${enrolledStudentIds.size} kishi)`}
                   </motion.button>
                 )}
@@ -346,7 +345,7 @@ export default function TeacherCourses() {
                         <motion.button whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }} onClick={handleSendIndividual}
                           disabled={isSubmitting || !indTitle.trim() || !indTask.trim()}
                           className="w-full py-4 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 text-white font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-violet-500/30 transition-all disabled:opacity-50">
-                          <Send className="w-5 h-5" />
+                          {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                           {isSubmitting ? 'Yuborilmoqda...' : 'Yuborish'}
                         </motion.button>
                       )}

@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Line, Bar } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler } from 'chart.js';
-import { Users, BookOpen, TrendingUp, UserCheck, Zap, Award, Target } from 'lucide-react';
+import { Users, BookOpen, TrendingUp, UserCheck, Zap, Award, Target, Loader2 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { api, Course, Student } from '@/services/api';
 import { useAppContext } from '@/contexts/AppContext';
 import { useLanguage } from '@/hooks/useTranslation';
@@ -20,38 +21,47 @@ export default function TeacherDashboard() {
   const [selectedCourse, setSelectedCourse] = useState('');
   const [selectedStudent, setSelectedStudent] = useState('');
   const [newScore, setNewScore] = useState('');
+  const [isSubmittingScore, setIsSubmittingScore] = useState(false);
   const [enrolledStudentIds, setEnrolledStudentIds] = useState<Set<number>>(new Set());
   const [courseEnrollments, setCourseEnrollments] = useState<{ [key: number]: number }>({});
 
   const currentTeacherId = parseInt(localStorage.getItem('user_id') || '0', 10);
 
+  const { data: teacherDashboardData, isLoading: teacherDataLoading } = useQuery({
+    queryKey: ['teacher-dashboard-data', currentTeacherId],
+    enabled: currentTeacherId > 0,
+    queryFn: async () => {
+      const [teacherCourses, s, p, a] = await Promise.all([
+        api.getCourses(currentTeacherId),
+        api.getStudents(),
+        api.getPerformance(),
+        api.getAttendance(),
+      ]);
+      const counts = await api.getEnrollmentCounts(teacherCourses.map((course) => course.id as number));
+      return { teacherCourses, students: s, performance: p, attendance: a, counts };
+    },
+    staleTime: 45_000,
+  });
+
   useEffect(() => {
-    Promise.all([api.getCourses(), api.getStudents(), api.getPerformance(), api.getAttendance()])
-      .then(([allCourses, s, p, a]) => {
-        const teacherCourses = allCourses.filter(course => course.teacher_id === currentTeacherId);
-        setCourses(teacherCourses);
-        setStudents(s);
-        setPerfs(p);
-        setAttends(a);
-        if (teacherCourses.length > 0) {
-          setSelectedCourse(teacherCourses[0].id?.toString() || '');
-          loadEnrollments(teacherCourses[0].id as number);
-          
-          Promise.all(teacherCourses.map(course => 
-            api.getEnrollments(course.id).then(enrollments => ({
-              courseId: course.id,
-              count: enrollments.length
-            }))
-          )).then(results => {
-            const enrollmentMap: { [key: number]: number } = {};
-            results.forEach(result => {
-              enrollmentMap[result.courseId] = result.count;
-            });
-            setCourseEnrollments(enrollmentMap);
-          }).catch(e => console.error('Error loading enrollments:', e));
-        }
-      }).finally(() => setLoading(false));
-  }, [currentTeacherId]);
+    if (!teacherDashboardData) return;
+    setCourses(teacherDashboardData.teacherCourses);
+    setStudents(teacherDashboardData.students);
+    setPerfs(teacherDashboardData.performance);
+    setAttends(teacherDashboardData.attendance);
+    setCourseEnrollments(teacherDashboardData.counts);
+    if (teacherDashboardData.teacherCourses.length > 0) {
+      setSelectedCourse((prev) => prev || teacherDashboardData.teacherCourses[0].id?.toString() || '');
+      loadEnrollments(teacherDashboardData.teacherCourses[0].id as number);
+    }
+    setLoading(false);
+  }, [teacherDashboardData]);
+
+  useEffect(() => {
+    if (teacherDataLoading) {
+      setLoading(true);
+    }
+  }, [teacherDataLoading]);
 
   const loadEnrollments = async (courseId: number) => {
     try {
@@ -114,6 +124,7 @@ export default function TeacherDashboard() {
       return;
     }
     try {
+      setIsSubmittingScore(true);
       await api.createPerformance({
         student_id: parseInt(selectedStudent),
         course_id: parseInt(selectedCourse),
@@ -127,16 +138,18 @@ export default function TeacherDashboard() {
       setNewScore('');
     } catch (e) {
       toast.error('Baho qo\'shishda xato');
+    } finally {
+      setIsSubmittingScore(false);
     }
   };
 
   if (loading) return <div className="p-10 opacity-50 flex items-center justify-center text-white">{t('status.loading')}</div>;
 
   const stats = [
-    { title: 'Kurslar', value: courses.length, icon: BookOpen, color: 'from-blue-500/20 to-cyan-500/20', iconColor: 'text-blue-400' },
-    { title: 'O\'quvchilar', value: totalStudents, icon: Users, color: 'from-purple-500/20 to-pink-500/20', iconColor: 'text-purple-400' },
-    { title: 'Davomatligi', value: `${todayAttendance}%`, icon: UserCheck, color: 'from-emerald-500/20 to-teal-500/20', iconColor: 'text-emerald-400' },
-    { title: 'O\'rtacha Baho', value: `${avgPerformance}%`, icon: Award, color: 'from-orange-500/20 to-red-500/20', iconColor: 'text-orange-400' },
+    { title: 'Kurslar', value: courses.length, icon: BookOpen, color: 'from-slate-900/90 to-blue-950/70', iconColor: 'text-blue-300' },
+    { title: 'O\'quvchilar', value: totalStudents, icon: Users, color: 'from-slate-900/90 to-blue-950/70', iconColor: 'text-blue-300' },
+    { title: 'Davomatligi', value: `${todayAttendance}%`, icon: UserCheck, color: 'from-slate-900/90 to-blue-950/70', iconColor: 'text-cyan-300' },
+    { title: 'O\'rtacha Baho', value: `${avgPerformance}%`, icon: Award, color: 'from-slate-900/90 to-blue-950/70', iconColor: 'text-indigo-300' },
   ];
 
   return (
@@ -146,7 +159,7 @@ export default function TeacherDashboard() {
         <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
 
           {/* TELEGRAM STYLE HEADER */}
-          <motion.div variants={{ hidden: { opacity: 0, y: -15 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl sm:rounded-3xl bg-gradient-to-br from-purple-600 to-blue-600 p-5 sm:p-7 md:p-10 shadow-xl">
+          <motion.div variants={{ hidden: { opacity: 0, y: -15 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 border border-blue-500/30 p-5 sm:p-7 md:p-10 shadow-[0_20px_60px_-20px_rgba(59,130,246,0.6)]">
             <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 sm:gap-6">
               <div className="flex-1">
                 <p className="text-purple-100/70 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-1 sm:mb-2">O'qituvchi Paneli</p>
@@ -233,11 +246,11 @@ export default function TeacherDashboard() {
 
                   <button
                     onClick={handleAddScore}
-                    disabled={!selectedStudent || !newScore}
-                    className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 sm:px-5 py-3 sm:py-4 text-xs sm:text-sm font-bold uppercase tracking-wider text-white shadow-lg hover:from-emerald-600 hover:to-teal-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                    disabled={!selectedStudent || !newScore || isSubmittingScore}
+                    className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 sm:px-5 py-3 sm:py-4 text-xs sm:text-sm font-bold uppercase tracking-wider text-white shadow-lg hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
                   >
-                    <Zap className="w-4 h-4 inline mr-2" />
-                    Kiritish
+                    {isSubmittingScore ? <Loader2 className="w-4 h-4 inline mr-2 animate-spin" /> : <Zap className="w-4 h-4 inline mr-2" />}
+                    {isSubmittingScore ? 'Saqlanmoqda...' : 'Kiritish'}
                   </button>
                 </motion.div>
 

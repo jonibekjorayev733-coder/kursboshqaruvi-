@@ -14,37 +14,33 @@ export default function TeacherReports() {
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [enrolledStudentIds, setEnrolledStudentIds] = useState<Set<number>>(new Set());
   const userId = localStorage.getItem('user_id');
+  const teacherId = userId ? parseInt(userId, 10) : NaN;
 
   const loadEnrollmentCounts = async (teacherCourses: Course[]) => {
     try {
-      const pairs = await Promise.all(
-        teacherCourses.map(async (course) => {
-          const enrollments = await api.getEnrollments(course.id as number);
-          return [course.id as number, enrollments.length] as const;
-        })
-      );
-      const next: Record<number, number> = {};
-      pairs.forEach(([courseId, count]) => {
-        next[courseId] = count;
-      });
-      setEnrollmentCounts(next);
+      const counts = await api.getEnrollmentCounts(teacherCourses.map((course) => course.id as number));
+      setEnrollmentCounts(counts);
     } catch (e) {
       console.error('Error loading enrollment counts:', e);
     }
   };
 
   useEffect(() => {
-    Promise.all([api.getCourses(), api.getStudents(), api.getPerformance(), api.getAttendance()])
+    if (Number.isNaN(teacherId) || teacherId <= 0) {
+      setLoading(false);
+      return;
+    }
+
+    Promise.all([api.getCourses(teacherId), api.getStudents(), api.getPerformance(), api.getAttendance()])
       .then(([c, s, p, a]) => {
-        const teacherCourses = c.filter((course: any) => course.teacher_id?.toString() === userId);
-        setCourses(teacherCourses);
-        loadEnrollmentCounts(teacherCourses);
+        setCourses(c);
+        loadEnrollmentCounts(c);
         setStudents(s);
         setPerformances(p);
         setAttendance(a);
-        if (teacherCourses.length > 0) {
-          setSelectedCourse(teacherCourses[0]);
-          loadEnrollments(teacherCourses[0].id as number);
+        if (c.length > 0) {
+          setSelectedCourse(c[0]);
+          loadEnrollments(c[0].id as number);
         }
       })
       .catch(e => {
@@ -52,7 +48,7 @@ export default function TeacherReports() {
         toast.error('Ma\'lumot yuklashda xatolik');
       })
       .finally(() => setLoading(false));
-  }, [userId]);
+  }, [teacherId]);
 
   const loadEnrollments = async (courseId: number) => {
     try {

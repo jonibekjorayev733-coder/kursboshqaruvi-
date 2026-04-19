@@ -16,6 +16,11 @@ import hashlib
 import uuid
 
 try:
+    import redis
+except ImportError:  # pragma: no cover
+    redis = None
+
+try:
     import models, schemas
     from database import engine, get_db
     from auth import hash_password, verify_password, create_access_token, decode_access_token
@@ -30,6 +35,62 @@ except ImportError:
 # models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="EduGrow Platform API")
+
+redis_client = None
+REDIS_DEFAULT_TTL_SECONDS = int(os.getenv("REDIS_CACHE_TTL", "60"))
+
+
+def init_redis_client():
+    global redis_client
+    redis_url = os.getenv("REDIS_URL")
+    if not redis_url or redis is None:
+        redis_client = None
+        return
+    try:
+        redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
+        redis_client.ping()
+        print("[CACHE] Redis connected")
+    except Exception as cache_error:
+        redis_client = None
+        print(f"[CACHE] Redis disabled: {cache_error}")
+
+
+def cache_get_json(cache_key: str):
+    if redis_client is None:
+        return None
+    try:
+        raw = redis_client.get(cache_key)
+        if raw is None:
+            return None
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def cache_set_json(cache_key: str, value, ttl_seconds: int = REDIS_DEFAULT_TTL_SECONDS):
+    if redis_client is None:
+        return
+    try:
+        redis_client.setex(cache_key, ttl_seconds, json.dumps(value, default=str))
+    except Exception:
+        return
+
+
+def cache_delete_prefix(prefix: str):
+    if redis_client is None:
+        return
+    try:
+        for key in redis_client.scan_iter(match=f"{prefix}*"):
+            redis_client.delete(key)
+    except Exception:
+        return
+
+
+def invalidate_reference_caches():
+    cache_delete_prefix("courses:")
+    cache_delete_prefix("teachers:")
+    cache_delete_prefix("students:")
+    cache_delete_prefix("enrollments:")
 
 # Configure CORS
 default_allowed_origins = [
@@ -52,6 +113,8 @@ app.add_middleware(
     allow_headers=["*"],
     allow_origin_regex=r"(https?://(localhost|127\.0\.0\.1)(:\d+)?$)|(https://[a-zA-Z0-9\-]+\.onrender\.com$)",
 )
+
+init_redis_client()
 
 
 class NotificationConnectionManager:
@@ -487,6 +550,7 @@ def create_course(course: schemas.CourseCreate, db: Session = Depends(get_db)):
     db.add(db_course)
     db.commit()
     db.refresh(db_course)
+    invalidate_reference_caches()
 
     emit_role_events("admin", "course.created", {"course_id": db_course.id, "name": db_course.name})
     emit_role_events("teacher", "course.created", {"course_id": db_course.id, "name": db_course.name}, user_id=db_course.teacher_id)
@@ -494,10 +558,18 @@ def create_course(course: schemas.CourseCreate, db: Session = Depends(get_db)):
 
 @app.get("/courses/", response_model=List[schemas.Course])
 def read_courses(skip: int = 0, limit: int = 100, teacher_id: Optional[int] = None, db: Session = Depends(get_db)):
+    cache_key = f"courses:{teacher_id or 'all'}:{skip}:{limit}"
+    cached = cache_get_json(cache_key)
+    if cached is not None:
+        return cached
+
     query = db.query(models.Course)
     if teacher_id:
         query = query.filter(models.Course.teacher_id == teacher_id)
-    return query.offset(skip).limit(limit).all()
+    result = query.offset(skip).limit(limit).all()
+    payload = [schemas.Course.model_validate(item).model_dump(mode="json") for item in result]
+    cache_set_json(cache_key, payload)
+    return payload
 
 @app.put("/courses/{course_id}", response_model=schemas.Course)
 def update_course(course_id: int, course: schemas.CourseCreate, db: Session = Depends(get_db)):
@@ -506,6 +578,7 @@ def update_course(course_id: int, course: schemas.CourseCreate, db: Session = De
     for key, value in course.model_dump().items(): setattr(db_course, key, value)
     db.commit()
     db.refresh(db_course)
+    invalidate_reference_caches()
 
     emit_role_events("admin", "course.updated", {"course_id": db_course.id, "name": db_course.name})
     emit_role_events("teacher", "course.updated", {"course_id": db_course.id, "name": db_course.name}, user_id=db_course.teacher_id)
@@ -518,6 +591,7 @@ def delete_course(course_id: int, db: Session = Depends(get_db)):
     deleted_payload = {"course_id": db_course.id, "name": db_course.name, "teacher_id": db_course.teacher_id}
     db.delete(db_course)
     db.commit()
+    invalidate_reference_caches()
     emit_role_events("admin", "course.deleted", deleted_payload)
     if deleted_payload.get("teacher_id"):
         emit_role_events("teacher", "course.deleted", deleted_payload, user_id=deleted_payload["teacher_id"])
@@ -580,6 +654,7 @@ async def create_enrollment(enrollment: schemas.CourseEnrollmentCreate, db: Sess
         db.add(db_notification)
 
         db.commit()
+        invalidate_reference_caches()
         db.refresh(db_enrollment)
         db.refresh(db_notification)
 
@@ -623,34 +698,104 @@ def delete_enrollment(student_id: int, course_id: int, db: Session = Depends(get
     
     db.delete(enrollment)
     db.commit()
+    invalidate_reference_caches()
     return {"message": "Enrollment deleted"}
+
+@app.get("/enrollments/counts")
+def get_enrollment_counts(course_ids: Optional[str] = None, db: Session = Depends(get_db)):
+    if not course_ids:
+        return []
+
+    ids: List[int] = []
+    for raw_id in course_ids.split(","):
+        raw_id = raw_id.strip()
+        if not raw_id:
+            continue
+        try:
+            ids.append(int(raw_id))
+        except ValueError:
+            continue
+
+    if not ids:
+        return []
+
+    normalized_ids = ",".join(str(i) for i in ids)
+    cache_key = f"enrollments:counts:{normalized_ids}"
+    cached = cache_get_json(cache_key)
+    if cached is not None:
+        return cached
+
+    rows = (
+        db.query(
+            models.CourseEnrollment.course_id,
+            func.count(models.CourseEnrollment.id).label("count"),
+        )
+        .filter(models.CourseEnrollment.course_id.in_(ids))
+        .group_by(models.CourseEnrollment.course_id)
+        .all()
+    )
+
+    count_by_course = {int(row.course_id): int(row.count) for row in rows}
+    payload = [{"course_id": course_id, "count": count_by_course.get(course_id, 0)} for course_id in ids]
+    cache_set_json(cache_key, payload)
+    return payload
 
 @app.get("/enrollments/{course_id}")
 def get_course_enrollments(course_id: int, db: Session = Depends(get_db)):
+    cache_key = f"enrollments:course:{course_id}"
+    cached = cache_get_json(cache_key)
+    if cached is not None:
+        return cached
+
     enrollments = db.query(models.CourseEnrollment).filter(
         models.CourseEnrollment.course_id == course_id
     ).all()
-    return enrollments
+    payload = [schemas.CourseEnrollment.model_validate(item).model_dump(mode="json") for item in enrollments]
+    cache_set_json(cache_key, payload)
+    return payload
 
 
 @app.get("/students/{student_id}/enrollments")
 def get_student_enrollments_v2(student_id: int, db: Session = Depends(get_db)):
+    cache_key = f"enrollments:student:{student_id}"
+    cached = cache_get_json(cache_key)
+    if cached is not None:
+        return cached
+
     enrollments = db.query(models.CourseEnrollment).filter(
         models.CourseEnrollment.student_id == student_id
     ).all()
-    return enrollments
+    payload = [schemas.CourseEnrollment.model_validate(item).model_dump(mode="json") for item in enrollments]
+    cache_set_json(cache_key, payload)
+    return payload
 
 
 @app.get("/enrollments/student/{student_id}")
 def get_student_enrollments(student_id: int, db: Session = Depends(get_db)):
+    cache_key = f"enrollments:student:{student_id}"
+    cached = cache_get_json(cache_key)
+    if cached is not None:
+        return cached
+
     enrollments = db.query(models.CourseEnrollment).filter(
         models.CourseEnrollment.student_id == student_id
     ).all()
-    return enrollments
+    payload = [schemas.CourseEnrollment.model_validate(item).model_dump(mode="json") for item in enrollments]
+    cache_set_json(cache_key, payload)
+    return payload
 
 # Teachers
 @app.get("/teachers/", response_model=List[schemas.Teacher])
-def read_teachers(db: Session = Depends(get_db)): return db.query(models.Teacher).all()
+def read_teachers(db: Session = Depends(get_db)):
+    cache_key = "teachers:list"
+    cached = cache_get_json(cache_key)
+    if cached is not None:
+        return cached
+
+    rows = db.query(models.Teacher).all()
+    payload = [schemas.Teacher.model_validate(item).model_dump(mode="json") for item in rows]
+    cache_set_json(cache_key, payload)
+    return payload
 
 @app.post("/teachers/", response_model=schemas.Teacher)
 def create_teacher(teacher: schemas.TeacherCreate, db: Session = Depends(get_db)):
@@ -665,6 +810,7 @@ def create_teacher(teacher: schemas.TeacherCreate, db: Session = Depends(get_db)
     db.add(db_teacher)
     db.commit()
     db.refresh(db_teacher)
+    invalidate_reference_caches()
 
     emit_role_events("admin", "teacher.created", {"teacher_id": db_teacher.id, "name": db_teacher.name})
     emit_role_events("teacher", "teacher.created", {"teacher_id": db_teacher.id, "name": db_teacher.name}, user_id=db_teacher.id)
@@ -684,6 +830,7 @@ def update_teacher(teacher_id: int, teacher: schemas.TeacherCreate, db: Session 
     for key, value in teacher.model_dump().items(): setattr(db_teacher, key, value)
     db.commit()
     db.refresh(db_teacher)
+    invalidate_reference_caches()
     emit_role_events("admin", "teacher.updated", {"teacher_id": db_teacher.id, "name": db_teacher.name})
     emit_role_events("teacher", "teacher.updated", {"teacher_id": db_teacher.id, "name": db_teacher.name}, user_id=db_teacher.id)
     return db_teacher
@@ -695,13 +842,23 @@ def delete_teacher(teacher_id: int, db: Session = Depends(get_db)):
     payload = {"teacher_id": db_teacher.id, "name": db_teacher.name}
     db.delete(db_teacher)
     db.commit()
+    invalidate_reference_caches()
     emit_role_events("admin", "teacher.deleted", payload)
     emit_role_events("teacher", "teacher.deleted", payload, user_id=payload["teacher_id"])
     return {"message": "deleted"}
 
 # Students
 @app.get("/students/", response_model=List[schemas.Student])
-def read_students(db: Session = Depends(get_db)): return db.query(models.Student).all()
+def read_students(db: Session = Depends(get_db)):
+    cache_key = "students:list"
+    cached = cache_get_json(cache_key)
+    if cached is not None:
+        return cached
+
+    rows = db.query(models.Student).all()
+    payload = [schemas.Student.model_validate(item).model_dump(mode="json") for item in rows]
+    cache_set_json(cache_key, payload)
+    return payload
 
 @app.post("/students/", response_model=schemas.Student)
 def create_student(student: schemas.StudentCreate, db: Session = Depends(get_db)):
@@ -721,6 +878,7 @@ def create_student(student: schemas.StudentCreate, db: Session = Depends(get_db)
     db.add(db_student)
     db.commit()
     db.refresh(db_student)
+    invalidate_reference_caches()
 
     emit_role_events("admin", "student.created", {"student_id": db_student.id, "name": db_student.name})
     emit_role_events("student", "student.created", {"student_id": db_student.id, "name": db_student.name}, user_id=db_student.id)
@@ -741,6 +899,7 @@ def update_student(student_id: int, student: schemas.StudentCreate, db: Session 
     for key, value in student.model_dump().items(): setattr(db_student, key, value)
     db.commit()
     db.refresh(db_student)
+    invalidate_reference_caches()
     emit_role_events("admin", "student.updated", {"student_id": db_student.id, "name": db_student.name})
     emit_role_events("student", "student.updated", {"student_id": db_student.id, "name": db_student.name}, user_id=db_student.id)
     return db_student
@@ -752,6 +911,7 @@ def delete_student(student_id: int, db: Session = Depends(get_db)):
     payload = {"student_id": db_student.id, "name": db_student.name}
     db.delete(db_student)
     db.commit()
+    invalidate_reference_caches()
     emit_role_events("admin", "student.deleted", payload)
     emit_role_events("student", "student.deleted", payload, user_id=payload["student_id"])
     return {"message": "deleted"}

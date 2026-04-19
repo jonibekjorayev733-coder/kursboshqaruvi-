@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend } from 'chart.js';
 import { Users, GraduationCap, BookOpen, DollarSign, TrendingUp, UserCheck, Zap, ArrowUpRight } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { api, Course } from '@/services/api';
 import { useAppContext } from '@/contexts/AppContext';
 import { useLanguage } from '@/hooks/useTranslation';
@@ -11,36 +12,33 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Le
 
 export default function AdminDashboard() {
   const { t } = useLanguage();
-  const [counts, setCounts] = useState({ students: 0, teachers: 0, courses: 0 });
-  const [coursesList, setCoursesList] = useState<Course[]>([]);
-  const [allPayments, setAllPayments] = useState<any[]>([]);
-  const [courseEnrollments, setCourseEnrollments] = useState<{ [key: number]: number }>({});
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-dashboard-data'],
+    queryFn: async () => {
+      const [students, teachers, courses, payments] = await Promise.all([
+        api.getStudents(),
+        api.getTeachers(),
+        api.getCourses(),
+        api.getPayments(),
+      ]);
+      const courseEnrollments = await api.getEnrollmentCounts(courses.map((course) => course.id as number));
+      return { students, teachers, courses, payments, courseEnrollments };
+    },
+    staleTime: 60_000,
+  });
 
-  useEffect(() => {
-    Promise.all([
-      api.getStudents(),
-      api.getTeachers(),
-      api.getCourses(),
-      api.getPayments()
-    ]).then(([s, t, c, p]) => {
-      setCounts({ students: s.length, teachers: t.length, courses: c.length });
-      setCoursesList(c);
-      setAllPayments(p);
-      
-      Promise.all(c.map(course => 
-        api.getEnrollments(course.id).then(enrollments => ({
-          courseId: course.id,
-          count: enrollments.length
-        }))
-      )).then(results => {
-        const enrollmentMap: { [key: number]: number } = {};
-        results.forEach(result => {
-          enrollmentMap[result.courseId] = result.count;
-        });
-        setCourseEnrollments(enrollmentMap);
-      }).catch(e => console.error('Error loading enrollments:', e));
-    }).catch(e => console.error(e));
-  }, []);
+  const counts = {
+    students: data?.students.length ?? 0,
+    teachers: data?.teachers.length ?? 0,
+    courses: data?.courses.length ?? 0,
+  };
+  const coursesList: Course[] = data?.courses ?? [];
+  const allPayments = data?.payments ?? [];
+  const courseEnrollments = data?.courseEnrollments ?? {};
+
+  if (isLoading) {
+    return <div className="p-10 opacity-50 flex items-center justify-center text-white">{t('status.loading')}</div>;
+  }
 
   const totalRevenue = useMemo(() => allPayments.filter(p => p.status === 'paid').reduce((s, p) => s + p.amount, 0), [allPayments]);
   const unpaidTotal = useMemo(() => allPayments.filter(p => p.status !== 'paid').reduce((s, p) => s + p.amount, 0), [allPayments]);
@@ -75,9 +73,9 @@ export default function AdminDashboard() {
   };
 
   const statItems = [
-    { title: 'O\'quvchilar', value: counts.students, icon: Users, bg: 'from-blue-500/20 to-cyan-500/20', color: 'text-cyan-400' },
-    { title: 'O\'qituvchilar', value: counts.teachers, icon: GraduationCap, bg: 'from-purple-500/20 to-pink-500/20', color: 'text-purple-400' },
-    { title: 'Kurslar', value: counts.courses, icon: BookOpen, bg: 'from-orange-500/20 to-red-500/20', color: 'text-orange-400' },
+    { title: 'O\'quvchilar', value: counts.students, icon: Users, bg: 'from-slate-900/90 to-blue-950/70', color: 'text-cyan-300' },
+    { title: 'O\'qituvchilar', value: counts.teachers, icon: GraduationCap, bg: 'from-slate-900/90 to-blue-950/70', color: 'text-blue-300' },
+    { title: 'Kurslar', value: counts.courses, icon: BookOpen, bg: 'from-slate-900/90 to-blue-950/70', color: 'text-indigo-300' },
   ];
 
   return (
@@ -88,7 +86,7 @@ export default function AdminDashboard() {
         <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
 
           {/* PREMIUM HEADER CARD - Bank Style */}
-          <motion.div variants={{ hidden: { opacity: 0, y: -20 }, visible: { opacity: 1, y: 0 } }} className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-cyan-600 to-blue-700 p-5 sm:p-7 md:p-10 shadow-2xl">
+          <motion.div variants={{ hidden: { opacity: 0, y: -20 }, visible: { opacity: 1, y: 0 } }} className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 border border-blue-500/30 p-5 sm:p-7 md:p-10 shadow-[0_20px_60px_-20px_rgba(59,130,246,0.6)]">
             <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
             <div className="absolute -top-40 -right-40 w-96 h-96 bg-white/10 rounded-full blur-3xl" />
             
@@ -146,21 +144,21 @@ export default function AdminDashboard() {
           <motion.div variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.08 } } }} className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
             
             {/* Outstanding Payments */}
-            <motion.div variants={{ hidden: { opacity: 0, y: 15 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl bg-gradient-to-br from-red-500/20 to-orange-500/20 border border-red-500/20 p-5 sm:p-6 backdrop-blur-sm">
+            <motion.div variants={{ hidden: { opacity: 0, y: 15 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl bg-gradient-to-br from-slate-900/90 to-blue-950/70 border border-blue-500/20 p-5 sm:p-6 backdrop-blur-sm">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">To'lov Qarz</p>
-                  <p className="text-2xl sm:text-3xl md:text-4xl font-black text-red-400">${unpaidTotal.toLocaleString()}</p>
+                  <p className="text-2xl sm:text-3xl md:text-4xl font-black text-blue-300">${unpaidTotal.toLocaleString()}</p>
                 </div>
-                <DollarSign className="w-6 h-6 sm:w-7 sm:h-7 text-red-400 opacity-50" />
+                <DollarSign className="w-6 h-6 sm:w-7 sm:h-7 text-blue-300 opacity-50" />
               </div>
-              <div className="h-1 bg-red-500/30 rounded-full overflow-hidden">
-                <motion.div initial={{ width: 0 }} animate={{ width: '45%' }} transition={{ duration: 1.5, delay: 0.5 }} className="h-full bg-red-500" />
+              <div className="h-1 bg-blue-500/30 rounded-full overflow-hidden">
+                <motion.div initial={{ width: 0 }} animate={{ width: '45%' }} transition={{ duration: 1.5, delay: 0.5 }} className="h-full bg-blue-500" />
               </div>
             </motion.div>
 
             {/* Active Users */}
-            <motion.div variants={{ hidden: { opacity: 0, y: 15 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/20 p-5 sm:p-6 backdrop-blur-sm">
+            <motion.div variants={{ hidden: { opacity: 0, y: 15 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl bg-gradient-to-br from-slate-900/90 to-blue-950/70 border border-blue-500/20 p-5 sm:p-6 backdrop-blur-sm">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Aktiv Foydalanuvchilar</p>
@@ -174,16 +172,16 @@ export default function AdminDashboard() {
             </motion.div>
 
             {/* Completion Rate */}
-            <motion.div variants={{ hidden: { opacity: 0, y: 15 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/20 p-5 sm:p-6 backdrop-blur-sm">
+            <motion.div variants={{ hidden: { opacity: 0, y: 15 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl bg-gradient-to-br from-slate-900/90 to-blue-950/70 border border-blue-500/20 p-5 sm:p-6 backdrop-blur-sm">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Dars Bajarilishi</p>
-                  <p className="text-2xl sm:text-3xl md:text-4xl font-black text-emerald-400">92%</p>
+                  <p className="text-2xl sm:text-3xl md:text-4xl font-black text-indigo-300">92%</p>
                 </div>
-                <TrendingUp className="w-6 h-6 sm:w-7 sm:h-7 text-emerald-400 opacity-50" />
+                <TrendingUp className="w-6 h-6 sm:w-7 sm:h-7 text-indigo-300 opacity-50" />
               </div>
-              <div className="h-1 bg-emerald-500/30 rounded-full overflow-hidden">
-                <motion.div initial={{ width: 0 }} animate={{ width: '92%' }} transition={{ duration: 1.5, delay: 0.7 }} className="h-full bg-emerald-500" />
+              <div className="h-1 bg-indigo-500/30 rounded-full overflow-hidden">
+                <motion.div initial={{ width: 0 }} animate={{ width: '92%' }} transition={{ duration: 1.5, delay: 0.7 }} className="h-full bg-indigo-500" />
               </div>
             </motion.div>
 

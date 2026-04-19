@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Doughnut, Bar } from 'react-chartjs-2';
 import { BookOpen, TrendingUp, Clock, Award, AlertCircle, Check, ArrowUpRight, Zap, Users } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { api, Course } from '@/services/api';
 import { useAppContext } from '@/contexts/AppContext';
 import { useLanguage } from '@/hooks/useTranslation';
@@ -14,9 +15,45 @@ export default function StudentDashboard() {
   const [assignments, setAssignments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [courseEnrollments, setCourseEnrollments] = useState<{ [key: number]: number }>({});
+  const isFetchingRef = useRef(false);
+  const lastFetchAtRef = useRef(0);
 
   const currentStudentIdRaw = localStorage.getItem('user_id');
   const currentStudentId = currentStudentIdRaw ? parseInt(currentStudentIdRaw, 10) : NaN;
+
+  const { data: studentDashboardData, refetch } = useQuery({
+    queryKey: ['student-dashboard-data', currentStudentId],
+    enabled: !Number.isNaN(currentStudentId),
+    queryFn: async () => {
+      const [courses, performance, attendance, assigns, studentEnrollments] = await Promise.all([
+        api.getCourses(),
+        api.getPerformance(),
+        api.getAttendance(),
+        api.getAssignments(),
+        api.getStudentEnrollments(currentStudentId),
+      ]);
+
+      const enrolledCourseIds = new Set<number>(studentEnrollments.map((en: any) => en.course_id));
+      const mine = courses.filter((course: any) => enrolledCourseIds.has(course.id));
+      const myPerfs = performance.filter((item: any) => item.student_id === currentStudentId);
+      const myAttends = attendance.filter((item: any) => item.student_id === currentStudentId);
+      const myAssignments = assigns.filter((assign: any) => {
+        if (assign.student_id === currentStudentId) return true;
+        if (assign.student_id === null && enrolledCourseIds.has(assign.course_id)) return true;
+        return false;
+      });
+      const enrollmentMap = await api.getEnrollmentCounts(mine.map((course: any) => course.id));
+
+      return {
+        mine,
+        myPerfs,
+        myAttends,
+        myAssignments,
+        enrollmentMap,
+      };
+    },
+    staleTime: 45_000,
+  });
 
   useEffect(() => {
     if (Number.isNaN(currentStudentId)) {
@@ -25,52 +62,37 @@ export default function StudentDashboard() {
     }
 
     const fetchDashboardData = async () => {
+      if (isFetchingRef.current) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastFetchAtRef.current < 1200) {
+        return;
+      }
+
+      isFetchingRef.current = true;
+      lastFetchAtRef.current = now;
+
       try {
-        const [courses, performance, attendance, assigns, studentEnrollments] = await Promise.all([
-          api.getCourses(),
-          api.getPerformance(),
-          api.getAttendance(),
-          api.getAssignments(),
-          api.getStudentEnrollments(currentStudentId),
-        ]);
-
-        const enrolledCourseIds = new Set<number>(studentEnrollments.map((en: any) => en.course_id));
-        const mine = courses.filter((course: any) => enrolledCourseIds.has(course.id));
-
-        setMyCourses(mine);
-        setPerfs(performance.filter((item: any) => item.student_id === currentStudentId));
-        setAttends(attendance.filter((item: any) => item.student_id === currentStudentId));
-
-        const myAssignments = assigns.filter((assign: any) => {
-          if (assign.student_id === currentStudentId) return true;
-          if (assign.student_id === null && enrolledCourseIds.has(assign.course_id)) return true;
-          return false;
-        });
-        setAssignments(myAssignments);
-
-        const enrollmentCounts = await Promise.all(
-          mine.map((course: any) =>
-            api.getEnrollments(course.id).then((enrollments: any[]) => ({
-              courseId: course.id,
-              count: enrollments.length,
-            }))
-          )
-        );
-
-        const enrollmentMap: { [key: number]: number } = {};
-        enrollmentCounts.forEach((entry) => {
-          enrollmentMap[entry.courseId] = entry.count;
-        });
-        setCourseEnrollments(enrollmentMap);
+        const queryResult = await refetch();
+        if (queryResult.data) {
+          setMyCourses(queryResult.data.mine);
+          setPerfs(queryResult.data.myPerfs);
+          setAttends(queryResult.data.myAttends);
+          setAssignments(queryResult.data.myAssignments);
+          setCourseEnrollments(queryResult.data.enrollmentMap);
+        }
       } catch (error) {
         console.error('Student dashboard error:', error);
       } finally {
+        isFetchingRef.current = false;
         setLoading(false);
       }
     };
 
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 30000);
+    const interval = setInterval(fetchDashboardData, 60000);
     const handleRealtime = (event: Event) => {
       const customEvent = event as CustomEvent<{ event?: string }>;
       const eventName = customEvent.detail?.event || '';
@@ -85,6 +107,17 @@ export default function StudentDashboard() {
       window.removeEventListener('edugrow-realtime-event', handleRealtime as EventListener);
     };
   }, [currentStudentId]);
+
+  useEffect(() => {
+    if (studentDashboardData) {
+      setMyCourses(studentDashboardData.mine);
+      setPerfs(studentDashboardData.myPerfs);
+      setAttends(studentDashboardData.myAttends);
+      setAssignments(studentDashboardData.myAssignments);
+      setCourseEnrollments(studentDashboardData.enrollmentMap);
+      setLoading(false);
+    }
+  }, [studentDashboardData]);
 
   const avgScore = useMemo(() => {
     if (perfs.length === 0) return 0;
@@ -107,10 +140,10 @@ export default function StudentDashboard() {
   if (loading) return <div className="p-10 opacity-50 flex items-center justify-center text-white">{t('status.loading')}</div>;
 
   const stats = [
-    { title: 'Kurslar', value: myCourses.length, icon: BookOpen, color: 'from-blue-500/20 to-cyan-500/20', iconColor: 'text-blue-400' },
-    { title: 'O\'rtacha Baho', value: `${avgScore}%`, icon: Award, color: 'from-purple-500/20 to-pink-500/20', iconColor: 'text-purple-400' },
-    { title: 'Davomatligi', value: `${attendanceRate}%`, icon: Check, color: 'from-emerald-500/20 to-teal-500/20', iconColor: 'text-emerald-400' },
-    { title: 'Topshiriqlar', value: `${completedAssignments}/${assignments.length}`, icon: Zap, color: 'from-orange-500/20 to-red-500/20', iconColor: 'text-orange-400' },
+    { title: 'Kurslar', value: myCourses.length, icon: BookOpen, color: 'from-slate-900/90 to-blue-950/70', iconColor: 'text-blue-300' },
+    { title: 'O\'rtacha Baho', value: `${avgScore}%`, icon: Award, color: 'from-slate-900/90 to-blue-950/70', iconColor: 'text-cyan-300' },
+    { title: 'Davomatligi', value: `${attendanceRate}%`, icon: Check, color: 'from-slate-900/90 to-blue-950/70', iconColor: 'text-indigo-300' },
+    { title: 'Topshiriqlar', value: `${completedAssignments}/${assignments.length}`, icon: Zap, color: 'from-slate-900/90 to-blue-950/70', iconColor: 'text-blue-300' },
   ];
 
   return (
@@ -120,15 +153,15 @@ export default function StudentDashboard() {
         <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
 
           {/* PREMIUM HEADER - Mobile App Style */}
-          <motion.div variants={{ hidden: { opacity: 0, y: -15 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl sm:rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-600 p-5 sm:p-7 md:p-10 shadow-xl">
+          <motion.div variants={{ hidden: { opacity: 0, y: -15 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 border border-blue-500/30 p-5 sm:p-7 md:p-10 shadow-[0_20px_60px_-20px_rgba(59,130,246,0.6)]">
             <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 sm:gap-6">
               <div className="flex-1">
-                <p className="text-emerald-100/70 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-1 sm:mb-2">O'quvchi Paneli</p>
+                <p className="text-blue-100/70 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-1 sm:mb-2">O'quvchi Paneli</p>
                 <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-white">Salom!</h1>
-                <p className="text-emerald-100/60 text-xs sm:text-sm mt-1">O'quv progressingizni kuzatib boring</p>
+                <p className="text-blue-100/60 text-xs sm:text-sm mt-1">O'quv progressingizni kuzatib boring</p>
               </div>
               <div className="text-right">
-                <p className="text-emerald-100/70 text-[10px] sm:text-xs font-semibold uppercase tracking-wider mb-1 sm:mb-2">Dars Sanasi</p>
+                <p className="text-blue-100/70 text-[10px] sm:text-xs font-semibold uppercase tracking-wider mb-1 sm:mb-2">Dars Sanasi</p>
                 <p className="text-lg sm:text-xl md:text-2xl font-black text-white">{new Date().toLocaleDateString('uz-UZ')}</p>
               </div>
             </div>
