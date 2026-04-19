@@ -18,6 +18,7 @@ interface PaymentFormProps {
 }
 
 type PaymentMethod = 'stripe' | 'click' | 'payme' | 'googlepay';
+const ENABLE_TEST_GATEWAYS = (import.meta.env.VITE_ENABLE_TEST_GATEWAYS as string | undefined) === 'true';
 
 export default function PaymentFormReal({
   paymentId,
@@ -29,7 +30,7 @@ export default function PaymentFormReal({
   onSuccess,
   onCancel,
 }: PaymentFormProps) {
-  const [method, setMethod] = useState<PaymentMethod>('stripe');
+  const [method, setMethod] = useState<PaymentMethod>('payme');
   const [loading, setLoading] = useState(false);
   const [showCardDetails, setShowCardDetails] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
@@ -422,52 +423,64 @@ export default function PaymentFormReal({
           </div>
 
           {/* Payment Method Tabs */}
-          <div className="grid grid-cols-4 gap-2">
-            <button
-              onClick={() => setMethod('stripe')}
-              disabled={paymentProcessing}
-              className={`p-3 rounded-lg text-xs font-semibold transition ${
-                method === 'stripe'
-                  ? 'bg-cyan-500 text-white'
-                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-              } disabled:opacity-50`}
-            >
-              💳 Karta
-            </button>
-            <button
-              onClick={() => setMethod('click')}
-              disabled={paymentProcessing}
-              className={`p-3 rounded-lg text-xs font-semibold transition ${
-                method === 'click'
-                  ? 'bg-cyan-500 text-white'
-                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-              } disabled:opacity-50`}
-            >
-              💰 Click
-            </button>
-            <button
-              onClick={() => setMethod('payme')}
-              disabled={paymentProcessing}
-              className={`p-3 rounded-lg text-xs font-semibold transition ${
-                method === 'payme'
-                  ? 'bg-cyan-500 text-white'
-                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-              } disabled:opacity-50`}
-            >
-              ₽ Payme
-            </button>
-            <button
-              onClick={() => setMethod('googlepay')}
-              disabled={paymentProcessing}
-              className={`p-3 rounded-lg text-xs font-semibold transition ${
-                method === 'googlepay'
-                  ? 'bg-cyan-500 text-white'
-                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-              } disabled:opacity-50`}
-            >
-              🔐 G. Pay
-            </button>
-          </div>
+          {ENABLE_TEST_GATEWAYS ? (
+            <div className="grid grid-cols-4 gap-2">
+              <button
+                onClick={() => setMethod('stripe')}
+                disabled={paymentProcessing}
+                className={`p-3 rounded-lg text-xs font-semibold transition ${
+                  method === 'stripe'
+                    ? 'bg-cyan-500 text-white'
+                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                } disabled:opacity-50`}
+              >
+                💳 Karta
+              </button>
+              <button
+                onClick={() => setMethod('click')}
+                disabled={paymentProcessing}
+                className={`p-3 rounded-lg text-xs font-semibold transition ${
+                  method === 'click'
+                    ? 'bg-cyan-500 text-white'
+                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                } disabled:opacity-50`}
+              >
+                💰 Click
+              </button>
+              <button
+                onClick={() => setMethod('payme')}
+                disabled={paymentProcessing}
+                className={`p-3 rounded-lg text-xs font-semibold transition ${
+                  method === 'payme'
+                    ? 'bg-cyan-500 text-white'
+                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                } disabled:opacity-50`}
+              >
+                ₽ Payme
+              </button>
+              <button
+                onClick={() => setMethod('googlepay')}
+                disabled={paymentProcessing}
+                className={`p-3 rounded-lg text-xs font-semibold transition ${
+                  method === 'googlepay'
+                    ? 'bg-cyan-500 text-white'
+                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                } disabled:opacity-50`}
+              >
+                🔐 G. Pay
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                onClick={() => setMethod('payme')}
+                disabled={paymentProcessing}
+                className="p-3 rounded-lg text-sm font-black transition bg-cyan-500 text-white disabled:opacity-50"
+              >
+                ₽ Payme (Haqiqiy to'lov)
+              </button>
+            </div>
+          )}
 
           {/* Stripe Card Form */}
           <AnimatePresence mode="wait">
@@ -611,8 +624,8 @@ export default function PaymentFormReal({
           <div className="bg-blue-900/30 border border-blue-500 rounded-lg p-3 flex gap-2 text-sm">
             <AlertTriangle size={18} className="text-blue-400 flex-shrink-0 mt-0.5" />
             <div className="text-blue-200">
-              <p className="font-semibold">🔐 Haqiqiy to'lov tizimi</p>
-              <p className="text-xs mt-1">Bu haqiqiy pul qabul qiladi. Operatorlar tasdiqlaydi.</p>
+              <p className="font-semibold">🔐 Haqiqiy to'lov: Payme checkout</p>
+              <p className="text-xs mt-1">To'lov Payme merchant checkout orqali yuradi va callback tasdiqdan keyin holat real vaqtda yangilanadi.</p>
             </div>
           </div>
 

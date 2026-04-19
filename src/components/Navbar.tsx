@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
     FaBarsStaggered, FaXmark
 } from 'react-icons/fa6';
@@ -16,6 +17,10 @@ export default function Navbar() {
         window.addEventListener('scroll', handleScroll);
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
+
+    useEffect(() => {
+        setIsMenuOpen(false);
+    }, [location.pathname]);
 
     const closeMenu = () => setIsMenuOpen(false);
 
@@ -50,14 +55,43 @@ export default function Navbar() {
                 </div>
             </div>
 
-            {/* Mobile Menu */}
-            <div className={`fixed inset-0 z-[10000] flex flex-col transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] ${isMenuOpen ? 'opacity-100 visible' : 'opacity-0 invisible translate-x-full'} ${theme === 'dark' ? 'bg-black' : 'bg-white'}`}>
-                <div className="flex flex-col justify-center h-full px-12 gap-10">
-                    <Link to="/login" onClick={closeMenu} className={`text-5xl font-black uppercase transition-all tracking-tighter italic ${theme === 'dark' ? 'text-white hover:text-white/70' : 'text-black hover:text-black/70'}`}>
-                        Kirish
-                    </Link>
-                </div>
-            </div>
+            <AnimatePresence>
+                {isMenuOpen && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.22, ease: 'easeOut' }}
+                        className="fixed inset-0 z-[10000]"
+                    >
+                        <motion.div
+                            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                            onClick={closeMenu}
+                        />
+                        <motion.div
+                            initial={{ x: '100%' }}
+                            animate={{ x: 0 }}
+                            exit={{ x: '100%' }}
+                            transition={{ type: 'spring', stiffness: 280, damping: 30, mass: 0.9 }}
+                            className={`absolute right-0 top-0 h-full w-[86%] max-w-sm ${theme === 'dark' ? 'bg-zinc-950' : 'bg-white'} border-l ${theme === 'dark' ? 'border-white/10' : 'border-black/10'} shadow-2xl`}
+                        >
+                            <div className="flex h-full flex-col px-8 py-10">
+                                <div className="mb-10 flex items-center justify-between">
+                                    <p className={`text-xs font-black uppercase tracking-[0.25em] ${theme === 'dark' ? 'text-white/50' : 'text-black/50'}`}>Menu</p>
+                                    <button onClick={closeMenu} className={`${theme === 'dark' ? 'text-white' : 'text-black'}`}>
+                                        <FaXmark size={26} />
+                                    </button>
+                                </div>
+                                <div className="flex flex-col gap-6">
+                                    <Link to="/login" onClick={closeMenu} className={`text-4xl font-black uppercase tracking-tight italic ${theme === 'dark' ? 'text-white hover:text-white/70' : 'text-black hover:text-black/70'} transition-colors`}>
+                                        Kirish
+                                    </Link>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </nav>
     );
 }

@@ -145,6 +145,10 @@ def schedule_realtime(channel: str, event: str, data: dict):
 
 
 def emit_role_events(role: str, event: str, data: dict, user_id: Optional[int] = None):
+    if user_id is not None and role in {"student", "teacher"}:
+        schedule_realtime(f"{role}:{user_id}", event, data)
+        return
+
     schedule_realtime(role, event, data)
     if user_id is not None:
         schedule_realtime(f"{role}:{user_id}", event, data)
@@ -472,19 +476,20 @@ def create_admin(admin: schemas.AdminCreate, db: Session = Depends(get_db)):
 # Courses
 @app.post("/courses/", response_model=schemas.Course)
 def create_course(course: schemas.CourseCreate, db: Session = Depends(get_db)):
-    # Ensure teacher_id is provided
     if not course.teacher_id:
         raise HTTPException(status_code=400, detail="teacher_id is required")
-    
-    # Verify teacher exists
+
     teacher = db.query(models.Teacher).filter(models.Teacher.id == course.teacher_id).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
-    
+
     db_course = models.Course(**course.model_dump())
     db.add(db_course)
     db.commit()
     db.refresh(db_course)
+
+    emit_role_events("admin", "course.created", {"course_id": db_course.id, "name": db_course.name})
+    emit_role_events("teacher", "course.created", {"course_id": db_course.id, "name": db_course.name}, user_id=db_course.teacher_id)
     return db_course
 
 @app.get("/courses/", response_model=List[schemas.Course])
@@ -501,14 +506,21 @@ def update_course(course_id: int, course: schemas.CourseCreate, db: Session = De
     for key, value in course.model_dump().items(): setattr(db_course, key, value)
     db.commit()
     db.refresh(db_course)
+
+    emit_role_events("admin", "course.updated", {"course_id": db_course.id, "name": db_course.name})
+    emit_role_events("teacher", "course.updated", {"course_id": db_course.id, "name": db_course.name}, user_id=db_course.teacher_id)
     return db_course
 
 @app.delete("/courses/{course_id}")
 def delete_course(course_id: int, db: Session = Depends(get_db)):
     db_course = db.query(models.Course).filter(models.Course.id == course_id).first()
     if db_course is None: raise HTTPException(status_code=404)
+    deleted_payload = {"course_id": db_course.id, "name": db_course.name, "teacher_id": db_course.teacher_id}
     db.delete(db_course)
     db.commit()
+    emit_role_events("admin", "course.deleted", deleted_payload)
+    if deleted_payload.get("teacher_id"):
+        emit_role_events("teacher", "course.deleted", deleted_payload, user_id=deleted_payload["teacher_id"])
     return {"message": "deleted"}
 
 # Course Enrollments
@@ -642,9 +654,7 @@ def read_teachers(db: Session = Depends(get_db)): return db.query(models.Teacher
 
 @app.post("/teachers/", response_model=schemas.Teacher)
 def create_teacher(teacher: schemas.TeacherCreate, db: Session = Depends(get_db)):
-    # Hash password
     hashed_password = hash_password(teacher.password)
-    # Create teacher object
     db_teacher = models.Teacher(
         name=teacher.name,
         email=teacher.email,
@@ -655,7 +665,10 @@ def create_teacher(teacher: schemas.TeacherCreate, db: Session = Depends(get_db)
     db.add(db_teacher)
     db.commit()
     db.refresh(db_teacher)
-    # Return without password
+
+    emit_role_events("admin", "teacher.created", {"teacher_id": db_teacher.id, "name": db_teacher.name})
+    emit_role_events("teacher", "teacher.created", {"teacher_id": db_teacher.id, "name": db_teacher.name}, user_id=db_teacher.id)
+
     return {
         "id": db_teacher.id,
         "name": db_teacher.name,
@@ -671,14 +684,19 @@ def update_teacher(teacher_id: int, teacher: schemas.TeacherCreate, db: Session 
     for key, value in teacher.model_dump().items(): setattr(db_teacher, key, value)
     db.commit()
     db.refresh(db_teacher)
+    emit_role_events("admin", "teacher.updated", {"teacher_id": db_teacher.id, "name": db_teacher.name})
+    emit_role_events("teacher", "teacher.updated", {"teacher_id": db_teacher.id, "name": db_teacher.name}, user_id=db_teacher.id)
     return db_teacher
 
 @app.delete("/teachers/{teacher_id}")
 def delete_teacher(teacher_id: int, db: Session = Depends(get_db)):
     db_teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
     if db_teacher is None: raise HTTPException(status_code=404)
+    payload = {"teacher_id": db_teacher.id, "name": db_teacher.name}
     db.delete(db_teacher)
     db.commit()
+    emit_role_events("admin", "teacher.deleted", payload)
+    emit_role_events("teacher", "teacher.deleted", payload, user_id=payload["teacher_id"])
     return {"message": "deleted"}
 
 # Students
@@ -687,14 +705,11 @@ def read_students(db: Session = Depends(get_db)): return db.query(models.Student
 
 @app.post("/students/", response_model=schemas.Student)
 def create_student(student: schemas.StudentCreate, db: Session = Depends(get_db)):
-    # Check if email already exists
     existing = db.query(models.Student).filter(models.Student.email == student.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Bu email allaqachon ro'yxatdan o'tgan")
-    
-    # Hash password
+
     hashed_password = hash_password(student.password)
-    # Create student object
     db_student = models.Student(
         name=student.name,
         email=student.email,
@@ -706,7 +721,10 @@ def create_student(student: schemas.StudentCreate, db: Session = Depends(get_db)
     db.add(db_student)
     db.commit()
     db.refresh(db_student)
-    # Return without password
+
+    emit_role_events("admin", "student.created", {"student_id": db_student.id, "name": db_student.name})
+    emit_role_events("student", "student.created", {"student_id": db_student.id, "name": db_student.name}, user_id=db_student.id)
+
     return {
         "id": db_student.id,
         "name": db_student.name,
@@ -723,14 +741,19 @@ def update_student(student_id: int, student: schemas.StudentCreate, db: Session 
     for key, value in student.model_dump().items(): setattr(db_student, key, value)
     db.commit()
     db.refresh(db_student)
+    emit_role_events("admin", "student.updated", {"student_id": db_student.id, "name": db_student.name})
+    emit_role_events("student", "student.updated", {"student_id": db_student.id, "name": db_student.name}, user_id=db_student.id)
     return db_student
 
 @app.delete("/students/{student_id}")
 def delete_student(student_id: int, db: Session = Depends(get_db)):
     db_student = db.query(models.Student).filter(models.Student.id == student_id).first()
     if db_student is None: raise HTTPException(status_code=404)
+    payload = {"student_id": db_student.id, "name": db_student.name}
     db.delete(db_student)
     db.commit()
+    emit_role_events("admin", "student.deleted", payload)
+    emit_role_events("student", "student.deleted", payload, user_id=payload["student_id"])
     return {"message": "deleted"}
 
 # Attendance

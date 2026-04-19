@@ -7,8 +7,8 @@ import { AppProvider } from './contexts/AppContext'
 import { LanguageProvider } from './hooks/useTranslation'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { AlertTriangle } from 'lucide-react'
-import { Toaster } from 'sonner'
-import { BACKEND_STATUS_EVENT, checkBackendConnection } from './services/api'
+import { toast, Toaster } from 'sonner'
+import { BACKEND_STATUS_EVENT, checkBackendConnection, connectRealtimeChannel, type RealtimeEvent } from './services/api'
 import './index.css'
 
 // App Panels - Teachers
@@ -33,6 +33,51 @@ import AdminCourses from './pages/admin/AdminCourses'
 import AdminPayments from './pages/admin/AdminPayments'
 import AdminAnalytics from './pages/admin/AdminAnalytics'
 import AdminNotifications from './pages/admin/AdminNotifications'
+
+const prettyRealtimeText = (event: RealtimeEvent) => {
+  switch (event.event) {
+    case 'enrollment.created':
+      return "Sizning guruh ma'lumotlaringiz yangilandi";
+    case 'assignment.created':
+      return 'Yangi vazifa qo‘shildi';
+    case 'assignment.updated':
+      return "Vazifa yangilandi";
+    case 'assignment.status_changed':
+      return 'Vazifa holati o‘zgardi';
+    case 'payment.updated':
+      return "To'lov holati yangilandi";
+    case 'notification.created':
+      return 'Yangi bildirishnoma keldi';
+    case 'course.created':
+    case 'course.updated':
+    case 'course.deleted':
+      return 'Kurslar bo‘limida o‘zgarish bor';
+    case 'teacher.created':
+    case 'teacher.updated':
+    case 'teacher.deleted':
+      return "O'qituvchi ma'lumotlari yangilandi";
+    case 'student.created':
+    case 'student.updated':
+    case 'student.deleted':
+      return "O'quvchi ma'lumotlari yangilandi";
+    default:
+      return "Yangi tizim xabari";
+  }
+};
+
+const showBankSmsToast = (title: string, body: string) => {
+  toast.custom((toastId) => (
+    <div className="w-[320px] rounded-2xl border border-emerald-300/40 bg-gradient-to-br from-emerald-50 via-emerald-100 to-cyan-100 p-4 shadow-2xl">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-700">SMS BANK</div>
+        <button onClick={() => toast.dismiss(toastId)} className="text-xs font-black text-emerald-700/70 hover:text-emerald-700">Yopish</button>
+      </div>
+      <p className="text-sm font-black text-emerald-900">{title}</p>
+      <p className="mt-1 text-xs leading-5 text-emerald-800">{body}</p>
+      <p className="mt-2 text-[10px] font-black text-emerald-700/70">Kurs Boshqaruvi • real-time</p>
+    </div>
+  ), { duration: 3500, position: 'top-right' });
+};
 
 // Protected Route Component
 function ProtectedRoute({ children, requiredRole }: { children: JSX.Element; requiredRole?: string }) {
@@ -64,6 +109,51 @@ function App() {
     window.addEventListener(BACKEND_STATUS_EVENT, handleBackendStatus as EventListener);
     return () => {
       window.removeEventListener(BACKEND_STATUS_EVENT, handleBackendStatus as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    const role = localStorage.getItem('role');
+    const userIdRaw = localStorage.getItem('user_id');
+    const userId = userIdRaw ? parseInt(userIdRaw, 10) : 0;
+
+    if (!role) {
+      return;
+    }
+
+    let disposed = false;
+    const reconnectTimers: number[] = [];
+    const sockets: Array<{ close: () => void }> = [];
+
+    const channels = [role];
+    if (userId > 0) {
+      channels.push(`${role}:${userId}`);
+    }
+
+    const connectChannel = (channel: string) => {
+      if (disposed) return;
+      const socket = connectRealtimeChannel(
+        channel,
+        (event) => {
+          window.dispatchEvent(new CustomEvent('edugrow-realtime-event', { detail: event }));
+          showBankSmsToast('Yangi xabar', prettyRealtimeText(event));
+        },
+        (connected) => {
+          if (!connected && !disposed) {
+            const reconnectId = window.setTimeout(() => connectChannel(channel), 2500);
+            reconnectTimers.push(reconnectId);
+          }
+        },
+      );
+      sockets.push(socket);
+    };
+
+    channels.forEach(connectChannel);
+
+    return () => {
+      disposed = true;
+      reconnectTimers.forEach((timer) => window.clearTimeout(timer));
+      sockets.forEach((socket) => socket.close());
     };
   }, []);
 
