@@ -25,10 +25,6 @@ except ImportError:
 
 app = FastAPI(title="EduGrow Platform API")
 
-@app.on_event("startup")
-def on_startup():
-    ensure_legacy_schema_compatibility()
-
 # Configure CORS
 default_allowed_origins = [
     "http://localhost:8080",
@@ -138,12 +134,12 @@ def sync_table_id_sequence(db: Session, table_name: str):
 
 
 def sync_critical_sequences_with_connection(conn):
-    for table_name in ("notification", "attendance", "assignment_progress"):
+    for table_name in ("notification", "attendance", "assignment_progress", "course_enrollment", "course", "student", "payment"):
         sync_table_id_sequence_with_connection(conn, table_name)
 
 
 def sync_critical_sequences(db: Session):
-    for table_name in ("notification", "attendance", "assignment_progress"):
+    for table_name in ("notification", "attendance", "assignment_progress", "course_enrollment", "course", "student", "payment"):
         sync_table_id_sequence(db, table_name)
 
 
@@ -159,13 +155,14 @@ def sync_notification_id_sequence(db: Session):
 
 @app.on_event("startup")
 def startup_schema_compatibility():
-    """Disabled for stability - sequence sync will happen per-request if needed"""
-    pass
-    # try:
-    #     with engine.begin() as conn:
-    #         sync_critical_sequences_with_connection(conn)
-    # except Exception as e:
-    #     print(f"Schema startup warning (non-fatal): {e}")
+    """Sync all table sequences on startup to avoid duplicate key errors"""
+    try:
+        with engine.begin() as conn:
+            sync_critical_sequences_with_connection(conn)
+            ensure_legacy_schema_compatibility()
+        print("[INFO] Database schema initialized successfully")
+    except Exception as e:
+        print(f"[WARNING] Schema startup issue: {e}")
 
 
 ALLOWED_ASSIGNMENT_STATUSES = {"accepted", "in_progress", "completed"}
