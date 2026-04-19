@@ -7,6 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
 dist
 dist-ssr
@@ -23,5 +24,43 @@ dist-ssr
 *.sln
 *.sw?
 
-# Local environment secrets
+# ===== SECRET / SENSITIVE FILES =====
+# Environment files (DB passwords, API keys, tokens)
 .env
+.env.*
+!.env.example
+*.env
+
+# Python secrets & cache
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.pyc
+
+# Temp / debug scripts
+_*.py
+_check_*.py
+_migrate_*.py
+_tmp_*.py
+_verify_*.py
+
+# Temp marker files
+.cleanup-note
+.noop
+.test
+.tmp*
+.toolcheck
+.x
+
+# Lock files (optional, keeps repo clean)
+bun.lockb
+
+# Embedded sub-repos (keep source separate)
+edugrow-platform-source/
+
+# Build artifacts
+dist/
+dist-ssr/
