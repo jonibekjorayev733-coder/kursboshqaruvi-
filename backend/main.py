@@ -8,10 +8,16 @@ from datetime import datetime
 import asyncio
 import calendar
 
-import models, schemas
-from database import engine, get_db
-from auth import hash_password, verify_password, create_access_token, decode_access_token
-from payment_gateways import PaymentProcessor, StripePaymentService
+try:
+    import models, schemas
+    from database import engine, get_db
+    from auth import hash_password, verify_password, create_access_token, decode_access_token
+    from payment_gateways import PaymentProcessor, StripePaymentService
+except ImportError:
+    from . import models, schemas
+    from .database import engine, get_db
+    from .auth import hash_password, verify_password, create_access_token, decode_access_token
+    from .payment_gateways import PaymentProcessor, StripePaymentService
 
 # Create tables
 # models.Base.metadata.create_all(bind=engine)

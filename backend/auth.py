@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
 from typing import Optional
-import jwt
 import hashlib
 import secrets
+from jose import jwt
+from jose.exceptions import ExpiredSignatureError, JWTError
 
 # JWT settings
 SECRET_KEY = "your-secret-key-change-in-production"
@@ -40,7 +41,7 @@ def decode_access_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
-    except jwt.ExpiredSignatureError:
+    except ExpiredSignatureError:
         return None
-    except jwt.InvalidTokenError:
+    except JWTError:
         return None
