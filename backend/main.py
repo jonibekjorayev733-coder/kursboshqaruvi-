@@ -25,6 +25,10 @@ except ImportError:
 
 app = FastAPI(title="EduGrow Platform API")
 
+@app.on_event("startup")
+def on_startup():
+    ensure_legacy_schema_compatibility()
+
 # Configure CORS
 default_allowed_origins = [
     "http://localhost:8080",
