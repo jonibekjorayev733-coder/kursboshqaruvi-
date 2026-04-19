@@ -178,6 +178,59 @@ export type NotificationSocketEvent = {
     notification: Notification;
 };
 
+export type RealtimeEvent = {
+    event: string;
+    channel: string;
+    timestamp: string;
+    data: Record<string, unknown>;
+};
+
+export const connectRealtimeChannel = (
+    channel: string,
+    onEvent: (event: RealtimeEvent) => void,
+    onConnectionStateChange?: (connected: boolean) => void,
+) => {
+    const socket = new WebSocket(`${WS_API_URL}/ws/events/${encodeURIComponent(channel)}`);
+
+    socket.onopen = () => {
+        onConnectionStateChange?.(true);
+    };
+
+    socket.onmessage = (event) => {
+        try {
+            const payload = JSON.parse(event.data) as RealtimeEvent;
+            if (payload?.event) {
+                onEvent(payload);
+            }
+        } catch {
+            // Ignore malformed socket events
+        }
+    };
+
+    socket.onclose = () => {
+        onConnectionStateChange?.(false);
+    };
+
+    socket.onerror = () => {
+        onConnectionStateChange?.(false);
+    };
+
+    const heartbeat = window.setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+            socket.send('ping');
+        }
+    }, 25000);
+
+    return {
+        close: () => {
+            window.clearInterval(heartbeat);
+            if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+                socket.close();
+            }
+        },
+    };
+};
+
 export const connectNotificationSocket = (
     userId: number,
     onNotification: (notification: Notification) => void,

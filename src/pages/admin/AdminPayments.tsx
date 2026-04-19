@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DollarSign, CreditCard, AlertTriangle, CheckCircle2, Clock, Send, Download, TrendingUp, X, Mail, Phone, MessageCircle, CheckCheck } from 'lucide-react';
 import { toast } from 'sonner';
-import { api } from '../../services/api';
+import { api, connectRealtimeChannel } from '../../services/api';
 
 interface Student {
   id: number;
@@ -44,6 +44,38 @@ export default function AdminPayments() {
 
   useEffect(() => {
     fetchPayments();
+  }, []);
+
+  useEffect(() => {
+    let reconnectId: number | null = null;
+    let socketRef: { close: () => void } | null = null;
+    let disposed = false;
+
+    const connect = () => {
+      if (disposed) return;
+      socketRef = connectRealtimeChannel(
+        'admin',
+        (event) => {
+          if (event.event === 'payment.updated' || event.event === 'enrollment.created') {
+            fetchPayments();
+          }
+        },
+        (connected) => {
+          if (!connected && !disposed) {
+            reconnectId = window.setTimeout(connect, 3000);
+          }
+        },
+      );
+    };
+
+    connect();
+    return () => {
+      disposed = true;
+      if (reconnectId !== null) {
+        window.clearTimeout(reconnectId);
+      }
+      socketRef?.close();
+    };
   }, []);
 
   const fetchPayments = async () => {

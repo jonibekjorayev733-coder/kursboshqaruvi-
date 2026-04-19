@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CreditCard, AlertTriangle, CheckCircle2, X, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { api } from '../../services/api';
+import { API_URL } from '../../services/api';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:8001`;
+const API_BASE_URL = API_URL;
 
 interface PaymentFormProps {
   paymentId: number;
@@ -253,34 +253,47 @@ export default function PaymentFormReal({
       const receiptData = await receiptResponse.json();
       
       toast.dismiss();
-      toast.success('Payme kvitantsiyasi yaratildi! Hamyonizdan to\'lab to\'rasiz...');
-      
-      // In real app, redirect to payment_url
-      // window.location.href = receiptData.payment_url;
-      
-      // For demo: simulate successful payment
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      toast.success('Payme checkout ochildi. To\'lovdan keyin holat avtomatik tekshiriladi.');
 
-      const statusResponse = await fetch(`${API_BASE_URL}/payments/real/payme/check-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          payment_id: paymentId,
-          receipt_id: receiptData.receipt_id,
-          student_id: studentId,
-          course_id: courseId,
-          amount,
-          month,
-        })
-      });
+      if (receiptData.payment_url) {
+        window.open(receiptData.payment_url, '_blank', 'noopener,noreferrer');
+      }
 
-      const statusData = await statusResponse.json();
-      
-      if (statusData.success) {
+      let paid = false;
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+
+        const statusResponse = await fetch(`${API_BASE_URL}/payments/real/payme/check-status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            payment_id: receiptData.payment_id || paymentId,
+            receipt_id: receiptData.receipt_id,
+            student_id: studentId,
+            course_id: courseId,
+            amount,
+            month,
+          })
+        });
+
+        if (!statusResponse.ok) {
+          continue;
+        }
+
+        const statusData = await statusResponse.json();
+        if (statusData.success && statusData.status === 'paid') {
+          paid = true;
+          break;
+        }
+      }
+
+      if (paid) {
         toast.success('✅ Payme to\'lov tasdiqlandi! Holat bazada yangilandi.');
         setTimeout(() => {
           onSuccess();
-        }, 1500);
+        }, 1200);
+      } else {
+        toast.info('To\'lov hali tasdiqlanmadi. To\'lovdan keyin sahifani yangilang.');
       }
     } catch (error: any) {
       toast.error(error.message || 'Payme to\'lov muvaffaq bo\'lmadi');

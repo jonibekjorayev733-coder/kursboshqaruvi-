@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Card } from '@/components/ui/card';
-import { api, type TeacherTaskNotificationFeed, type TeacherTaskNotificationItem } from '@/services/api';
+import { api, connectRealtimeChannel, type TeacherTaskNotificationFeed, type TeacherTaskNotificationItem } from '@/services/api';
 import { toast } from 'sonner';
 
 const sections: Array<{ key: keyof TeacherTaskNotificationFeed; title: string; subtitle: string }> = [
@@ -78,8 +78,41 @@ export default function TeacherNotifications() {
 
   useEffect(() => {
     loadFeed();
-    const timer = setInterval(loadFeed, 20000);
-    return () => clearInterval(timer);
+    const timer = setInterval(loadFeed, 45000);
+
+    let reconnectId: number | null = null;
+    let socketRef: { close: () => void } | null = null;
+    let disposed = false;
+
+    const connect = () => {
+      if (disposed) return;
+      socketRef = connectRealtimeChannel(
+        `teacher:${teacherId}`,
+        (event) => {
+          if (event.event === 'assignment.status_changed' || event.event === 'assignment.created' || event.event === 'assignment.updated') {
+            loadFeed();
+          }
+        },
+        (connected) => {
+          if (!connected && !disposed) {
+            reconnectId = window.setTimeout(connect, 3000);
+          }
+        },
+      );
+    };
+
+    if (teacherId) {
+      connect();
+    }
+
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+      if (reconnectId !== null) {
+        window.clearTimeout(reconnectId);
+      }
+      socketRef?.close();
+    };
   }, []);
 
   if (loading) return <div className="p-10 text-center text-slate-400">Yuklanmoqda...</div>;

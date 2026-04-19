@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Header, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, status, Header, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
@@ -10,6 +10,10 @@ import calendar
 import os
 import json
 import urllib.request
+import base64
+import hmac
+import hashlib
+import uuid
 
 try:
     import models, schemas
@@ -90,6 +94,62 @@ class NotificationConnectionManager:
 notification_manager = NotificationConnectionManager()
 
 
+class RealtimeChannelManager:
+    def __init__(self):
+        self.channels: Dict[str, Set[WebSocket]] = {}
+
+    async def connect(self, channel: str, websocket: WebSocket):
+        await websocket.accept()
+        listeners = self.channels.setdefault(channel, set())
+        listeners.add(websocket)
+
+    def disconnect(self, channel: str, websocket: WebSocket):
+        listeners = self.channels.get(channel)
+        if not listeners:
+            return
+        listeners.discard(websocket)
+        if not listeners:
+            self.channels.pop(channel, None)
+
+    async def broadcast(self, channel: str, payload: dict):
+        listeners = self.channels.get(channel)
+        if not listeners:
+            return
+
+        broken: List[WebSocket] = []
+        for socket in list(listeners):
+            try:
+                await socket.send_json(payload)
+            except Exception:
+                broken.append(socket)
+
+        for socket in broken:
+            self.disconnect(channel, socket)
+
+
+realtime_manager = RealtimeChannelManager()
+
+
+def schedule_realtime(channel: str, event: str, data: dict):
+    payload = {
+        "event": event,
+        "channel": channel,
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": data,
+    }
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(realtime_manager.broadcast(channel, payload))
+    except RuntimeError:
+        pass
+
+
+def emit_role_events(role: str, event: str, data: dict, user_id: Optional[int] = None):
+    schedule_realtime(role, event, data)
+    if user_id is not None:
+        schedule_realtime(f"{role}:{user_id}", event, data)
+
+
 def notification_to_payload(notification: models.Notification) -> dict:
     created_at_value = notification.created_at.isoformat() if notification.created_at else None
     return {
@@ -131,6 +191,36 @@ def send_sms_via_webhook(phone: Optional[str], message: str) -> bool:
         return False
 
 
+def build_payme_checkout_url(payment_id: int, amount: float) -> str:
+    merchant_id = os.getenv("PAYME_MERCHANT_ID", "").strip()
+    checkout_base = os.getenv("PAYME_CHECKOUT_BASE", "https://checkout.paycom.uz")
+    amount_tiyin = int(round(float(amount) * 100))
+
+    if not merchant_id:
+        return ""
+
+    account = {
+        "payment_id": str(payment_id),
+    }
+    account_json = json.dumps(account, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    account_encoded = base64.urlsafe_b64encode(account_json).decode("utf-8").rstrip("=")
+    return f"{checkout_base}/?m={merchant_id}&ac={account_encoded}&a={amount_tiyin}"
+
+
+def verify_payme_callback_signature(raw_body: bytes, signature: str) -> bool:
+    secret = os.getenv("PAYME_CALLBACK_SECRET", "").strip()
+    allow_unsafe = os.getenv("PAYME_ALLOW_UNSAFE_CALLBACK", "false").lower() == "true"
+    if allow_unsafe and not secret:
+        return True
+    if not secret:
+        return False
+    if not signature:
+        return False
+
+    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
 @app.websocket("/ws/notifications/{user_id}")
 async def notifications_ws(websocket: WebSocket, user_id: int):
     await notification_manager.connect(user_id, websocket)
@@ -141,6 +231,18 @@ async def notifications_ws(websocket: WebSocket, user_id: int):
         notification_manager.disconnect(user_id, websocket)
     except Exception:
         notification_manager.disconnect(user_id, websocket)
+
+
+@app.websocket("/ws/events/{channel}")
+async def realtime_events_ws(websocket: WebSocket, channel: str):
+    await realtime_manager.connect(channel, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        realtime_manager.disconnect(channel, websocket)
+    except Exception:
+        realtime_manager.disconnect(channel, websocket)
 
 # Initialize test data on startup
 # Data already initialized via init_db.py
@@ -473,6 +575,16 @@ async def create_enrollment(enrollment: schemas.CourseEnrollmentCreate, db: Sess
             enrollment.student_id,
             notification_to_payload(db_notification),
         )
+
+        event_payload = {
+            "student_id": enrollment.student_id,
+            "course_id": enrollment.course_id,
+            "course_name": course_name,
+            "notification_id": db_notification.id,
+        }
+        emit_role_events("admin", "enrollment.created", event_payload)
+        emit_role_events("teacher", "enrollment.created", event_payload)
+        emit_role_events("student", "enrollment.created", event_payload, user_id=enrollment.student_id)
 
         if not notification_manager.is_online(enrollment.student_id):
             send_sms_via_webhook(
@@ -849,6 +961,24 @@ def update_payment(payment_id: int, payment: schemas.PaymentUpdate, db: Session 
     
     db.commit()
     db.refresh(db_payment)
+
+    emit_role_events(
+        "student",
+        "payment.updated",
+        {"payment_id": db_payment.id, "status": db_payment.status, "course_id": db_payment.course_id},
+        user_id=db_payment.student_id,
+    )
+    emit_role_events(
+        "admin",
+        "payment.updated",
+        {"payment_id": db_payment.id, "status": db_payment.status, "course_id": db_payment.course_id},
+    )
+    emit_role_events(
+        "teacher",
+        "payment.updated",
+        {"payment_id": db_payment.id, "status": db_payment.status, "course_id": db_payment.course_id},
+    )
+
     return db_payment
 
 @app.post("/payments/{payment_id}/send-sms")
@@ -1054,6 +1184,23 @@ def confirm_stripe_payment(
         ))
     db.commit()
     
+    emit_role_events(
+        "student",
+        "payment.updated",
+        {"payment_id": payment.id, "status": "paid", "course_id": payment.course_id},
+        user_id=payment.student_id,
+    )
+    emit_role_events(
+        "admin",
+        "payment.updated",
+        {"payment_id": payment.id, "status": "paid", "course_id": payment.course_id},
+    )
+    emit_role_events(
+        "teacher",
+        "payment.updated",
+        {"payment_id": payment.id, "status": "paid", "course_id": payment.course_id},
+    )
+
     return {
         "success": True,
         "payment_id": payment.id,
@@ -1166,6 +1313,23 @@ async def verify_click_payment(
                 type="payment_received"
             ))
         db.commit()
+
+        emit_role_events(
+            "student",
+            "payment.updated",
+            {"payment_id": payment.id, "status": "paid", "course_id": payment.course_id},
+            user_id=payment.student_id,
+        )
+        emit_role_events(
+            "admin",
+            "payment.updated",
+            {"payment_id": payment.id, "status": "paid", "course_id": payment.course_id},
+        )
+        emit_role_events(
+            "teacher",
+            "payment.updated",
+            {"payment_id": payment.id, "status": "paid", "course_id": payment.course_id},
+        )
         
         return {
             "success": True,
@@ -1185,33 +1349,66 @@ async def create_payme_receipt(
     payload: schemas.PaymeReceiptRequest,
     db: Session = Depends(get_db)
 ):
-    """Create Payme receipt for payment"""
-    # Verify student and course
+    """Create Payme checkout session URL for a course payment."""
     student = db.query(models.Student).filter(models.Student.id == payload.student_id).first()
     course = db.query(models.Course).filter(models.Course.id == payload.course_id).first()
-    
+
     if not student or not course:
         raise HTTPException(status_code=404, detail="Student or course not found")
-    
-    # Create Payme receipt
-    from payment_gateways import PaymePaymentService
-    result = await PaymePaymentService.create_receipt(
-        payload.amount,
-        payload.student_id,
-        payload.course_id,
-        payload.phone,
-        f"Course payment: {course.name}"
-    )
-    
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
-    
+
+    payment = None
+    if payload.payment_id is not None:
+        payment = db.query(models.Payment).filter(models.Payment.id == payload.payment_id).first()
+
+    if not payment:
+        payment = db.query(models.Payment).filter(
+            (models.Payment.student_id == payload.student_id) &
+            (models.Payment.course_id == payload.course_id) &
+            (models.Payment.month == (payload.month or datetime.utcnow().strftime("%Y-%m")))
+        ).first()
+
+    if not payment:
+        sync_table_id_sequence(db, "payment")
+        payment = models.Payment(
+            student_id=payload.student_id,
+            course_id=payload.course_id,
+            amount=payload.amount,
+            currency="UZS",
+            status="pending",
+            payment_method="payme",
+            payment_details={},
+            month=payload.month or datetime.utcnow().strftime("%Y-%m"),
+        )
+        db.add(payment)
+        db.flush()
+
+    checkout_url = build_payme_checkout_url(payment.id, payload.amount)
+    if not checkout_url:
+        raise HTTPException(status_code=500, detail="PAYME_MERCHANT_ID is not configured")
+
+    session_token = f"payme_{uuid.uuid4().hex}"
+    details = payment.payment_details or {}
+    details.update({
+        "receipt_id": session_token,
+        "checkout_url": checkout_url,
+        "phone": payload.phone,
+        "payme_status": "pending",
+        "updated_at": datetime.utcnow().isoformat(),
+    })
+
+    payment.payment_method = "payme"
+    payment.status = "pending"
+    payment.amount = payload.amount
+    payment.payment_details = details
+    db.commit()
+
     return {
-        "receipt_id": result.get("receipt_id"),
-        "payment_url": result.get("url"),
+        "receipt_id": session_token,
+        "payment_id": payment.id,
+        "payment_url": checkout_url,
         "amount": payload.amount,
         "phone": payload.phone,
-        "message": "Payme receipt created. User can pay from their wallet."
+        "message": "Payme checkout session created"
     }
 
 @app.post("/payments/real/payme/check-status")
@@ -1219,84 +1416,125 @@ async def check_payme_status(
     payload: schemas.PaymeStatusRequest,
     db: Session = Depends(get_db)
 ):
-    """Check Payme payment status"""
-    from payment_gateways import PaymePaymentService
-    
-    result = await PaymePaymentService.get_payment_status(payload.receipt_id)
-    
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
-    
-    # Update database if paid
-    if result.get("paid"):
-        payment = None
-        if payload.payment_id is not None:
-            payment = db.query(models.Payment).filter(models.Payment.id == payload.payment_id).first()
+    """Check Payme payment status from local DB state (updated by callback)."""
+    payment = None
+    if payload.payment_id is not None:
+        payment = db.query(models.Payment).filter(models.Payment.id == payload.payment_id).first()
 
-        if not payment:
-            payment = db.query(models.Payment).filter(
-                (models.Payment.student_id == payload.student_id) &
-                (models.Payment.course_id == payload.course_id)
-            ).first()
-        
-        if payment:
-            payment.status = "paid"
-            payment.payment_method = "payme"
-            payment.payment_details = {"receipt_id": payload.receipt_id}
-            payment.paid_date = datetime.utcnow().isoformat()
-            if payload.amount is not None:
-                payment.amount = payload.amount
-        else:
-            payment = models.Payment(
-                student_id=payload.student_id,
-                course_id=payload.course_id,
-                amount=payload.amount or 0,
-                currency="UZS",
-                status="paid",
-                payment_method="payme",
-                payment_details={"receipt_id": payload.receipt_id},
-                month=payload.month or datetime.utcnow().strftime("%Y-%m"),
-                paid_date=datetime.utcnow().isoformat()
-            )
-            db.add(payment)
-        
-        db.commit()
-        db.refresh(payment)
-        
-        # Create notifications
+    if not payment:
+        payment = db.query(models.Payment).filter(
+            (models.Payment.student_id == payload.student_id) &
+            (models.Payment.course_id == payload.course_id)
+        ).order_by(models.Payment.updated_at.desc()).first()
+
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    details = payment.payment_details or {}
+    receipt_id = details.get("receipt_id")
+    if receipt_id and payload.receipt_id and receipt_id != payload.receipt_id:
+        raise HTTPException(status_code=400, detail="Invalid receipt id")
+
+    if payment.status == "paid":
+        return {
+            "success": True,
+            "payment_id": payment.id,
+            "status": "paid",
+            "message": "Payme payment confirmed",
+        }
+
+    return {
+        "success": False,
+        "payment_id": payment.id,
+        "status": payment.status,
+        "message": "Payment not yet completed"
+    }
+
+
+@app.post("/payments/real/payme/webhook")
+async def payme_webhook(
+    request: Request,
+    x_payme_signature: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Payme callback endpoint. Verifies signature and marks payment as paid."""
+    raw_body = await request.body()
+    if not verify_payme_callback_signature(raw_body, x_payme_signature or ""):
+        raise HTTPException(status_code=401, detail="Invalid Payme callback signature")
+
+    payload = await request.json()
+    payment_id_raw = payload.get("payment_id")
+    status_value = str(payload.get("status", "")).lower()
+    transaction_id = payload.get("transaction_id")
+
+    if payment_id_raw is None:
+        raise HTTPException(status_code=400, detail="payment_id is required")
+
+    try:
+        payment_id = int(payment_id_raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="payment_id must be integer")
+
+    payment = db.query(models.Payment).filter(models.Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    details = payment.payment_details or {}
+    details.update({
+        "payme_status": status_value,
+        "transaction_id": transaction_id,
+        "webhook_received_at": datetime.utcnow().isoformat(),
+    })
+    payment.payment_details = details
+
+    if status_value in {"paid", "success", "completed", "2"}:
+        payment.status = "paid"
+        payment.payment_method = "payme"
+        payment.paid_date = datetime.utcnow().isoformat()
+
         student = db.query(models.Student).filter(models.Student.id == payment.student_id).first()
         course = db.query(models.Course).filter(models.Course.id == payment.course_id).first()
-        student_name = student.name if student else f"Student #{payment.student_id}"
         course_name = course.name if course else f"Kurs #{payment.course_id}"
+        student_name = student.name if student else f"Student #{payment.student_id}"
         paid_time = datetime.utcnow().strftime("%d.%m.%Y %H:%M")
+
+        sync_notification_id_sequence(db)
         db.add(models.Notification(
             user_id=payment.student_id,
             title="✅ To'lov qabul qilindi",
-            message=f"{course_name} kursi uchun ${payment.amount} to'lov Payme orqali qabul qilindi. Sana: {paid_time}",
+            message=f"{course_name} kursi uchun {payment.amount} UZS to'lov Payme orqali qabul qilindi. Sana: {paid_time}",
             type="payment_paid"
         ))
+
         from models import Admin
         for adm in db.query(Admin).all():
             db.add(models.Notification(
                 user_id=adm.id,
                 title="💳 Yangi to'lov keldi",
-                message=f"{student_name} → {course_name}: ${payment.amount} (Payme) • {paid_time}",
+                message=f"{student_name} → {course_name}: {payment.amount} UZS (Payme) • {paid_time}",
                 type="payment_received"
             ))
-        db.commit()
-        
-        return {
-            "success": True,
-            "payment_id": payment.id,
-            "status": "paid",
-            "message": "Payme payment confirmed. Payment status updated."
-        }
-    
-    return {
-        "success": False,
-        "status": result.get("status"),
-        "message": "Payment not yet completed"
-    }
+
+        emit_role_events(
+            "student",
+            "payment.updated",
+            {"payment_id": payment.id, "status": "paid", "course_id": payment.course_id},
+            user_id=payment.student_id,
+        )
+        emit_role_events(
+            "admin",
+            "payment.updated",
+            {"payment_id": payment.id, "status": "paid", "course_id": payment.course_id},
+        )
+        emit_role_events(
+            "teacher",
+            "payment.updated",
+            {"payment_id": payment.id, "status": "paid", "course_id": payment.course_id},
+        )
+
+    db.commit()
+
+    return {"success": True}
 
 @app.get("/payments/real/google-pay/config")
 def get_google_pay_config(student_id: int, course_id: int):
@@ -1337,6 +1575,17 @@ async def create_notification(notification: schemas.NotificationCreate, db: Sess
     if not notification_manager.is_online(db_n.user_id):
         student = db.query(models.Student).filter(models.Student.id == db_n.user_id).first()
         send_sms_via_webhook(student.phone if student else None, db_n.message)
+
+    emit_role_events(
+        "student",
+        "notification.created",
+        {
+            "notification_id": db_n.id,
+            "user_id": db_n.user_id,
+            "type": db_n.type,
+        },
+        user_id=db_n.user_id,
+    )
 
     return db_n
 
@@ -1401,6 +1650,20 @@ def create_assignment(assignment: schemas.AssignmentCreate, db: Session = Depend
             db.add(db_n)
     
     db.commit()
+
+    assignment_event = {
+        "assignment_id": db_assignment.id,
+        "course_id": db_assignment.course_id,
+        "teacher_id": db_assignment.teacher_id,
+        "student_id": db_assignment.student_id,
+        "title": db_assignment.title,
+    }
+    emit_role_events("teacher", "assignment.created", assignment_event, user_id=db_assignment.teacher_id)
+    if db_assignment.student_id:
+        emit_role_events("student", "assignment.created", assignment_event, user_id=db_assignment.student_id)
+    else:
+        emit_role_events("student", "assignment.created", assignment_event)
+
     return db_assignment
 
 @app.put("/assignments/{assignment_id}", response_model=schemas.Assignment)
@@ -1443,6 +1706,20 @@ def update_assignment(assignment_id: int, assignment: schemas.AssignmentCreate, 
             db.add(db_n)
     
     db.commit()
+
+    update_event = {
+        "assignment_id": db_assignment.id,
+        "course_id": db_assignment.course_id,
+        "teacher_id": db_assignment.teacher_id,
+        "student_id": db_assignment.student_id,
+        "title": db_assignment.title,
+    }
+    emit_role_events("teacher", "assignment.updated", update_event, user_id=db_assignment.teacher_id)
+    if db_assignment.student_id:
+        emit_role_events("student", "assignment.updated", update_event, user_id=db_assignment.student_id)
+    else:
+        emit_role_events("student", "assignment.updated", update_event)
+
     return db_assignment
 
 @app.post("/assignments/{assignment_id}/submit")
@@ -1560,6 +1837,19 @@ def update_assignment_status(
             )
 
         db.refresh(progress)
+
+        status_event = {
+            "assignment_id": assignment_id,
+            "student_id": payload.student_id,
+            "teacher_id": db_assignment.teacher_id,
+            "course_id": db_assignment.course_id,
+            "status": payload.status,
+            "progress_id": progress.id,
+        }
+        emit_role_events("teacher", "assignment.status_changed", status_event, user_id=db_assignment.teacher_id)
+        emit_role_events("admin", "assignment.status_changed", status_event)
+        emit_role_events("student", "assignment.status_changed", status_event, user_id=payload.student_id)
+
         return progress
     except HTTPException:
         raise

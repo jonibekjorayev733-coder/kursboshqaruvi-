@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { DollarSign, AlertTriangle, CheckCircle2, Clock, CreditCard, CheckCheck, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
-import { api } from '../../services/api';
+import { api, connectRealtimeChannel } from '../../services/api';
 import PaymentFormReal from '../../components/student/PaymentFormReal';
 
 interface Payment {
@@ -43,6 +43,42 @@ export default function StudentPayments() {
     // Re-fetch payments every 30 seconds to sync with database
     const interval = setInterval(fetchPayments, 30000);
     return () => clearInterval(interval);
+  }, [studentId]);
+
+  useEffect(() => {
+    if (Number.isNaN(studentId)) {
+      return;
+    }
+
+    let reconnectId: number | null = null;
+    let socketRef: { close: () => void } | null = null;
+    let disposed = false;
+
+    const connect = () => {
+      if (disposed) return;
+      socketRef = connectRealtimeChannel(
+        `student:${studentId}`,
+        (event) => {
+          if (event.event === 'payment.updated' || event.event === 'enrollment.created') {
+            fetchPayments();
+          }
+        },
+        (connected) => {
+          if (!connected && !disposed) {
+            reconnectId = window.setTimeout(connect, 3000);
+          }
+        },
+      );
+    };
+
+    connect();
+    return () => {
+      disposed = true;
+      if (reconnectId !== null) {
+        window.clearTimeout(reconnectId);
+      }
+      socketRef?.close();
+    };
   }, [studentId]);
 
   useEffect(() => {
