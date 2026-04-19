@@ -24,6 +24,7 @@ import StudentDashboard from './pages/student/StudentDashboard'
 import StudentAttendance from './pages/student/StudentAttendance'
 import StudentPayments from './pages/student/StudentPayments'
 import StudentNotifications from './pages/student/StudentNotificationsV2'
+import StudentSettings from './pages/student/StudentSettings'
 
 // App Panels - Admin
 import AdminDashboard from './pages/admin/AdminDashboard'
@@ -231,6 +232,7 @@ function App() {
                   <Route path="/student/attendance" element={<ProtectedRoute requiredRole="student"><StudentAttendance /></ProtectedRoute>} />
                   <Route path="/student/payments" element={<ProtectedRoute requiredRole="student"><StudentPayments /></ProtectedRoute>} />
                   <Route path="/student/notifications" element={<ProtectedRoute requiredRole="student"><StudentNotifications /></ProtectedRoute>} />
+                  <Route path="/student/settings" element={<ProtectedRoute requiredRole="student"><StudentSettings /></ProtectedRoute>} />
                 </Route>
                 
                 {/* Fallback */}

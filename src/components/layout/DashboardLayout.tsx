@@ -42,7 +42,7 @@ export function DashboardLayout() {
         animate={{
           marginLeft: isDesktop ? (sidebarOpen ? 280 : 100) : 0,
         }}
-        transition={{ duration: 0.8, ease: [0.23, 1, 0.32, 1] }}
+        transition={{ duration: 0.35, ease: [0.22, 0.8, 0.24, 1] }}
         className="flex flex-col min-h-screen relative z-10"
       >
         <TopBar />

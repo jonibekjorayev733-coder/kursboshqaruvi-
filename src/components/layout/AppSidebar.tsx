@@ -15,34 +15,34 @@ interface NavItem {
 
 const navItems: Record<UserRole, NavItem[]> = {
   student: [
-    { label: 'Dashboard', path: '/student', icon: <LayoutDashboard className="w-5 h-5" /> },
-    { label: 'Attendance', path: '/student/attendance', icon: <Calendar className="w-5 h-5" /> },
-    { label: 'Payments', path: '/student/payments', icon: <CreditCard className="w-5 h-5" /> },
-    { label: 'Notifications', path: '/student/notifications', icon: <Bell className="w-5 h-5" /> },
+    { label: 'Bosh sahifa', path: '/student', icon: <LayoutDashboard className="w-5 h-5" /> },
+    { label: 'Davomat', path: '/student/attendance', icon: <Calendar className="w-5 h-5" /> },
+    { label: 'To‘lovlar', path: '/student/payments', icon: <CreditCard className="w-5 h-5" /> },
+    { label: 'Bildirishnomalar', path: '/student/notifications', icon: <Bell className="w-5 h-5" /> },
   ],
   teacher: [
-    { label: 'Dashboard', path: '/teacher', icon: <LayoutDashboard className="w-5 h-5" /> },
-    { label: 'Courses', path: '/teacher/courses', icon: <BookOpen className="w-5 h-5" /> },
-    { label: 'Attendance', path: '/teacher/attendance', icon: <UserCheck className="w-5 h-5" /> },
-    { label: 'Notifications', path: '/teacher/notifications', icon: <Bell className="w-5 h-5" /> },
-    { label: 'Reports', path: '/teacher/reports', icon: <FileText className="w-5 h-5" /> },
+    { label: 'Bosh sahifa', path: '/teacher', icon: <LayoutDashboard className="w-5 h-5" /> },
+    { label: 'Kurslar', path: '/teacher/courses', icon: <BookOpen className="w-5 h-5" /> },
+    { label: 'Davomat', path: '/teacher/attendance', icon: <UserCheck className="w-5 h-5" /> },
+    { label: 'Bildirishnomalar', path: '/teacher/notifications', icon: <Bell className="w-5 h-5" /> },
+    { label: 'Hisobotlar', path: '/teacher/reports', icon: <FileText className="w-5 h-5" /> },
   ],
   admin: [
-    { label: 'Dashboard', path: '/admin', icon: <LayoutDashboard className="w-5 h-5" /> },
-    { label: 'Teachers', path: '/admin/teachers', icon: <GraduationCap className="w-5 h-5" /> },
-    { label: 'Students', path: '/admin/students', icon: <Users className="w-5 h-5" /> },
-    { label: 'Course Students', path: '/admin/course-students', icon: <UserCheck className="w-5 h-5" /> },
-    { label: 'Courses', path: '/admin/courses', icon: <BookOpen className="w-5 h-5" /> },
-    { label: 'Payments', path: '/admin/payments', icon: <CreditCard className="w-5 h-5" /> },
-    { label: 'Notifications', path: '/admin/notifications', icon: <Bell className="w-5 h-5" /> },
-    { label: 'Analytics', path: '/admin/analytics', icon: <BarChart3 className="w-5 h-5" /> },
+    { label: 'Bosh sahifa', path: '/admin', icon: <LayoutDashboard className="w-5 h-5" /> },
+    { label: 'O‘qituvchilar', path: '/admin/teachers', icon: <GraduationCap className="w-5 h-5" /> },
+    { label: 'O‘quvchilar', path: '/admin/students', icon: <Users className="w-5 h-5" /> },
+    { label: 'Kurs o‘quvchilari', path: '/admin/course-students', icon: <UserCheck className="w-5 h-5" /> },
+    { label: 'Kurslar', path: '/admin/courses', icon: <BookOpen className="w-5 h-5" /> },
+    { label: 'To‘lovlar', path: '/admin/payments', icon: <CreditCard className="w-5 h-5" /> },
+    { label: 'Bildirishnomalar', path: '/admin/notifications', icon: <Bell className="w-5 h-5" /> },
+    { label: 'Tahlillar', path: '/admin/analytics', icon: <BarChart3 className="w-5 h-5" /> },
   ],
 };
 
 const roleLabels: Record<UserRole, string> = {
-  student: 'Student',
-  teacher: 'Teacher',
-  admin: 'Admin',
+  student: 'O‘quvchi paneli',
+  teacher: 'O‘qituvchi paneli',
+  admin: 'Admin paneli',
 };
 
 export function AppSidebar() {
@@ -68,7 +68,7 @@ export function AppSidebar() {
       <motion.aside
         initial={false}
         animate={{ width: sidebarOpen ? 280 : 100 }}
-        transition={{ duration: 0.8, ease: [0.23, 1, 0.32, 1] }}
+        transition={{ duration: 0.35, ease: [0.22, 0.8, 0.24, 1] }}
         className={`fixed left-0 top-0 h-full z-50 flex flex-col border-r border-white/10 shadow-[0_20px_80px_rgba(0,0,0,0.75)] transition-transform duration-500
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
         style={{
@@ -93,8 +93,8 @@ export function AppSidebar() {
                 exit={{ opacity: 0, x: -20 }}
                 className="flex flex-col relative z-10"
               >
-                <span className="text-2xl font-black tracking-tight text-white">EduFlow</span>
-                <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-300/70">Ultra Pro Max</span>
+                <span className="text-2xl font-black tracking-tight text-white">Kurs Boshqaruvi</span>
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-300/70">Ta'lim platformasi</span>
               </motion.div>
             )}
           </AnimatePresence>
@@ -112,7 +112,7 @@ export function AppSidebar() {
                   animate={{ opacity: 1 }}
                   className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70 truncate relative z-10"
                 >
-                  {roleLabels[role]} Command
+                  {roleLabels[role]}
                 </motion.span>
               ) : (
                 <span className="text-xs font-bold text-cyan-300 relative z-10">{role[0].toUpperCase()}</span>
@@ -140,7 +140,7 @@ export function AppSidebar() {
                   <motion.div
                     layoutId="liquid-active-marker"
                     className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-7 rounded-r-full bg-cyan-300 shadow-[0_0_16px_rgba(34,211,238,0.9)]"
-                    transition={{ type: "spring", bounce: 0.2, duration: 0.8 }}
+                    transition={{ type: "spring", bounce: 0.2, duration: 0.38 }}
                   />
                 )}
 
@@ -184,12 +184,12 @@ export function AppSidebar() {
           >
             <motion.div
               animate={{ rotate: sidebarOpen ? 0 : 180 }}
-              transition={{ duration: 0.8, ease: "backOut" }}
+              transition={{ duration: 0.32, ease: "backOut" }}
               className="relative z-10"
             >
               {sidebarOpen ? <ChevronLeft className="w-5 h-5 text-slate-300 group-hover:text-cyan-200" /> : <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-cyan-200" />}
             </motion.div>
-            {sidebarOpen && <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300 group-hover:text-cyan-200 relative z-10">Conceal Interface</span>}
+            {sidebarOpen && <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300 group-hover:text-cyan-200 relative z-10">Menyuni yopish</span>}
             <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           </button>
         </div>

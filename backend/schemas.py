@@ -51,6 +51,10 @@ class Student(StudentBase):
     id: int
     class Config: from_attributes = True
 
+class StudentPasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
 class CourseBase(BaseModel):
     name: str
     description: str

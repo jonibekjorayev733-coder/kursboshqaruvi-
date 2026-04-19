@@ -756,6 +756,47 @@ def delete_student(student_id: int, db: Session = Depends(get_db)):
     emit_role_events("student", "student.deleted", payload, user_id=payload["student_id"])
     return {"message": "deleted"}
 
+
+@app.put("/students/{student_id}/password")
+def change_student_password(
+    student_id: int,
+    payload: schemas.StudentPasswordChangeRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    token = authorization.replace("Bearer ", "")
+    token_payload = decode_access_token(token)
+    if not token_payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    requester_role = token_payload.get("role")
+    requester_user_id = token_payload.get("user_id")
+
+    if requester_role != "student" or int(requester_user_id) != student_id:
+        raise HTTPException(status_code=403, detail="You can only change your own password")
+
+    db_student = db.query(models.Student).filter(models.Student.id == student_id).first()
+    if db_student is None:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    current_password = payload.current_password.strip()
+    new_password = payload.new_password.strip()
+
+    if not verify_password(current_password, db_student.password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+
+    db_student.password = hash_password(new_password)
+    db.commit()
+
+    emit_role_events("student", "student.password_updated", {"student_id": student_id}, user_id=student_id)
+    return {"message": "Password updated successfully"}
+
 # Attendance
 @app.get("/attendance/", response_model=List[schemas.Attendance])
 def read_attendance(

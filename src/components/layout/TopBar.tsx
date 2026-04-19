@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Menu, Bell, LogOut } from 'lucide-react';
+import { Menu, Bell, LogOut, Settings } from 'lucide-react';
 import { useAppContext } from '@/contexts/AppContext';
 import type { UserRole } from '@/types';
 
@@ -8,6 +8,12 @@ const roleOptions: { value: UserRole; label: string; color: string }[] = [
   { value: 'student', label: '🎓 Student', color: 'bg-primary/15 text-primary' },
   { value: 'teacher', label: '👨‍🏫 Teacher', color: 'bg-accent/15 text-accent' },
 ];
+
+const roleBadgeText: Record<UserRole, string> = {
+  admin: 'ADMIN',
+  teacher: 'O‘QITUVCHI',
+  student: 'O‘QUVCHI',
+};
 
 export function TopBar() {
   const { role, setRole, theme, setSidebarOpen } = useAppContext();
@@ -43,6 +49,13 @@ export function TopBar() {
       return;
     }
     navigate('/teacher/notifications');
+  };
+
+  const handleOpenSettings = () => {
+    setShowUserMenu(false);
+    if (role === 'student') {
+      navigate('/student/settings');
+    }
   };
 
   return (
@@ -89,7 +102,7 @@ export function TopBar() {
           >
             <div className="flex flex-col items-end">
               <span className="text-xs font-semibold">{userName}</span>
-              <span className="text-[10px] text-muted-foreground">{role.toUpperCase()}</span>
+              <span className="text-[10px] text-muted-foreground">{roleBadgeText[role]}</span>
             </div>
             <div className="w-8 h-8 rounded-full gradient-primary flex items-center justify-center text-xs font-bold text-primary-foreground">
               {role[0].toUpperCase()}
@@ -103,12 +116,21 @@ export function TopBar() {
                 <p className="text-sm font-semibold">{userName}</p>
                 <p className="text-xs text-muted-foreground">{userEmail}</p>
               </div>
+              {role === 'student' && (
+                <button
+                  onClick={handleOpenSettings}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-muted/40 transition-colors"
+                >
+                  <Settings className="w-4 h-4" />
+                  Sozlamalar (Settings)
+                </button>
+              )}
               <button
                 onClick={handleLogout}
                 className="w-full flex items-center gap-2 px-4 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
               >
                 <LogOut className="w-4 h-4" />
-                Chiqish (Logout)
+                Chiqish
               </button>
             </div>
           )}

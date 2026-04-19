@@ -455,6 +455,35 @@ export const api = {
         return response.json();
     },
 
+    async changeStudentPassword(studentId: number, currentPassword: string, newPassword: string): Promise<{ message: string }> {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${API_URL}/students/${studentId}/password`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword,
+            }),
+        });
+
+        if (!response.ok) {
+            let message = 'Failed to change password';
+            try {
+                const body = await response.json();
+                if (body?.detail) message = String(body.detail);
+            } catch {
+                const raw = await response.text();
+                if (raw) message = raw;
+            }
+            throw new Error(message);
+        }
+
+        return response.json();
+    },
+
     async deleteStudent(id: number): Promise<void> {
         const response = await fetch(`${API_URL}/students/${id}`, {
             method: 'DELETE',
