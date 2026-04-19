@@ -92,6 +92,15 @@ def invalidate_reference_caches():
     cache_delete_prefix("students:")
     cache_delete_prefix("enrollments:")
 
+
+def serialize_enrollment_row(enrollment: models.CourseEnrollment):
+    return {
+        "id": enrollment.id,
+        "student_id": enrollment.student_id,
+        "course_id": enrollment.course_id,
+        "enrolled_at": enrollment.enrolled_at.isoformat() if enrollment.enrolled_at else None,
+    }
+
 # Configure CORS
 default_allowed_origins = [
     "http://localhost:8080",
@@ -750,7 +759,7 @@ def get_course_enrollments(course_id: int, db: Session = Depends(get_db)):
     enrollments = db.query(models.CourseEnrollment).filter(
         models.CourseEnrollment.course_id == course_id
     ).all()
-    payload = [schemas.CourseEnrollment.model_validate(item).model_dump(mode="json") for item in enrollments]
+    payload = [serialize_enrollment_row(item) for item in enrollments]
     cache_set_json(cache_key, payload)
     return payload
 
@@ -765,7 +774,7 @@ def get_student_enrollments_v2(student_id: int, db: Session = Depends(get_db)):
     enrollments = db.query(models.CourseEnrollment).filter(
         models.CourseEnrollment.student_id == student_id
     ).all()
-    payload = [schemas.CourseEnrollment.model_validate(item).model_dump(mode="json") for item in enrollments]
+    payload = [serialize_enrollment_row(item) for item in enrollments]
     cache_set_json(cache_key, payload)
     return payload
 
@@ -780,7 +789,7 @@ def get_student_enrollments(student_id: int, db: Session = Depends(get_db)):
     enrollments = db.query(models.CourseEnrollment).filter(
         models.CourseEnrollment.student_id == student_id
     ).all()
-    payload = [schemas.CourseEnrollment.model_validate(item).model_dump(mode="json") for item in enrollments]
+    payload = [serialize_enrollment_row(item) for item in enrollments]
     cache_set_json(cache_key, payload)
     return payload
 
