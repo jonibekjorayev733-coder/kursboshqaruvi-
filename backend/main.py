@@ -489,7 +489,20 @@ def login(request: schemas.LoginRequest, db: Session = Depends(get_db)):
     
     # Check teacher
     db_teacher = db.query(models.Teacher).filter(func.lower(models.Teacher.email) == normalized_email).first()
-    if db_teacher and verify_password(normalized_password, db_teacher.password):
+    teacher_password_valid = False
+    if db_teacher:
+        try:
+            teacher_password_valid = verify_password(normalized_password, db_teacher.password)
+        except Exception:
+            teacher_password_valid = False
+
+        if not teacher_password_valid and db_teacher.password == normalized_password:
+            db_teacher.password = hash_password(normalized_password)
+            db.commit()
+            db.refresh(db_teacher)
+            teacher_password_valid = True
+
+    if db_teacher and teacher_password_valid:
         access_token = create_access_token({"user_id": db_teacher.id, "role": "teacher"})
         return {
             "access_token": access_token,
@@ -857,16 +870,39 @@ def create_teacher(teacher: schemas.TeacherCreate, db: Session = Depends(get_db)
     }
 
 @app.put("/teachers/{teacher_id}", response_model=schemas.Teacher)
-def update_teacher(teacher_id: int, teacher: schemas.TeacherCreate, db: Session = Depends(get_db)):
+def update_teacher(teacher_id: int, teacher: schemas.TeacherUpdate, db: Session = Depends(get_db)):
     db_teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
     if db_teacher is None: raise HTTPException(status_code=404)
-    for key, value in teacher.model_dump().items(): setattr(db_teacher, key, value)
+
+    normalized_email = teacher.email.strip().lower()
+    existing = db.query(models.Teacher).filter(
+        func.lower(models.Teacher.email) == normalized_email,
+        models.Teacher.id != teacher_id,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Bu email allaqachon ro'yxatdan o'tgan")
+
+    db_teacher.name = teacher.name
+    db_teacher.email = normalized_email
+    db_teacher.avatar = teacher.avatar
+    db_teacher.subject = teacher.subject
+
+    incoming_password = teacher.password.strip() if teacher.password else None
+    if incoming_password:
+        db_teacher.password = hash_password(incoming_password)
+
     db.commit()
     db.refresh(db_teacher)
     invalidate_reference_caches()
     emit_role_events("admin", "teacher.updated", {"teacher_id": db_teacher.id, "name": db_teacher.name})
     emit_role_events("teacher", "teacher.updated", {"teacher_id": db_teacher.id, "name": db_teacher.name}, user_id=db_teacher.id)
-    return db_teacher
+    return {
+        "id": db_teacher.id,
+        "name": db_teacher.name,
+        "email": db_teacher.email,
+        "avatar": db_teacher.avatar,
+        "subject": db_teacher.subject
+    }
 
 @app.delete("/teachers/{teacher_id}")
 def delete_teacher(teacher_id: int, db: Session = Depends(get_db)):

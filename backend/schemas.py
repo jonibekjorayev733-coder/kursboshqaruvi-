@@ -28,6 +28,13 @@ class TeacherCreate(BaseModel):
     avatar: Optional[str] = None
     subject: Optional[str] = None
 
+class TeacherUpdate(BaseModel):
+    name: str
+    email: str
+    password: Optional[str] = None
+    avatar: Optional[str] = None
+    subject: Optional[str] = None
+
 class Teacher(TeacherBase):
     id: int
     class Config: from_attributes = True
