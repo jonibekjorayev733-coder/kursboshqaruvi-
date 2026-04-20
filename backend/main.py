@@ -487,10 +487,10 @@ def login(request: schemas.LoginRequest, db: Session = Depends(get_db)):
             "email": db_admin.email
         }
     
-    # Check teacher
-    db_teacher = db.query(models.Teacher).filter(func.lower(models.Teacher.email) == normalized_email).first()
-    teacher_password_valid = False
-    if db_teacher:
+    # Check teacher (handle legacy duplicate-case emails safely)
+    db_teachers = db.query(models.Teacher).filter(func.lower(models.Teacher.email) == normalized_email).all()
+    for db_teacher in db_teachers:
+        teacher_password_valid = False
         try:
             teacher_password_valid = verify_password(normalized_password, db_teacher.password)
         except Exception:
@@ -502,16 +502,16 @@ def login(request: schemas.LoginRequest, db: Session = Depends(get_db)):
             db.refresh(db_teacher)
             teacher_password_valid = True
 
-    if db_teacher and teacher_password_valid:
-        access_token = create_access_token({"user_id": db_teacher.id, "role": "teacher"})
-        return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user_id": db_teacher.id,
-            "role": "teacher",
-            "name": db_teacher.name,
-            "email": db_teacher.email
-        }
+        if teacher_password_valid:
+            access_token = create_access_token({"user_id": db_teacher.id, "role": "teacher"})
+            return {
+                "access_token": access_token,
+                "token_type": "bearer",
+                "user_id": db_teacher.id,
+                "role": "teacher",
+                "name": db_teacher.name,
+                "email": db_teacher.email
+            }
     
     # Check student
     db_student = db.query(models.Student).filter(func.lower(models.Student.email) == normalized_email).first()
@@ -875,12 +875,14 @@ def update_teacher(teacher_id: int, teacher: schemas.TeacherUpdate, db: Session 
     if db_teacher is None: raise HTTPException(status_code=404)
 
     normalized_email = teacher.email.strip().lower()
-    existing = db.query(models.Teacher).filter(
-        func.lower(models.Teacher.email) == normalized_email,
-        models.Teacher.id != teacher_id,
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Bu email allaqachon ro'yxatdan o'tgan")
+    current_email_normalized = (db_teacher.email or "").strip().lower()
+    if normalized_email != current_email_normalized:
+        existing = db.query(models.Teacher).filter(
+            func.lower(models.Teacher.email) == normalized_email,
+            models.Teacher.id != teacher_id,
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Bu email allaqachon ro'yxatdan o'tgan")
 
     db_teacher.name = teacher.name
     db_teacher.email = normalized_email
