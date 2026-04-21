@@ -1115,8 +1115,8 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
     enrollment_rows = db.query(models.CourseEnrollment.student_id).filter(
         models.CourseEnrollment.course_id == db_lesson.course_id
     ).all()
-    enrolled_student_ids = {row[0] for row in enrollment_rows}
-    submitted_student_ids = {item.student_id for item in payload.records}
+    enrolled_student_ids = {row[0] for row in enrollment_rows if row[0] is not None}
+    submitted_student_ids = {item.student_id for item in payload.records if item.student_id is not None}
 
     if enrolled_student_ids and submitted_student_ids != enrolled_student_ids:
         missing = len(enrolled_student_ids - submitted_student_ids)
@@ -1132,6 +1132,10 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
     for item in payload.records:
         if item.penalty_hours not in ALLOWED_ATTENDANCE_HOURS:
             raise HTTPException(status_code=400, detail="Attendance qiymati faqat 0, 2 yoki 4 bo'lishi mumkin")
+        if item.grade is None:
+            raise HTTPException(status_code=400, detail="Har bir o'quvchi uchun baho kiritilishi kerak")
+        if item.grade < 0 or item.grade > 100:
+            raise HTTPException(status_code=400, detail="Baho 0 dan 100 gacha bo'lishi kerak")
 
         existing = db.query(models.Attendance).filter(
             models.Attendance.lesson_id == lesson_id,
@@ -1145,7 +1149,7 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
             existing.status = status_value
             existing.penalty_hours = item.penalty_hours
             existing.late_minutes = None
-            existing.grade = None
+            existing.grade = item.grade
             saved_records.append(existing)
             continue
 
@@ -1158,7 +1162,7 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
             status=status_value,
             penalty_hours=item.penalty_hours,
             late_minutes=None,
-            grade=None,
+            grade=item.grade,
         )
         db.add(db_attendance)
         saved_records.append(db_attendance)

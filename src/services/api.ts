@@ -220,6 +220,7 @@ export interface Lesson {
 export interface LessonAttendanceEntry {
     student_id: number;
     penalty_hours: 0 | 2 | 4;
+    grade: number;
 }
 
 export type NotificationSocketEvent = {

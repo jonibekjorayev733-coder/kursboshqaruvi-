@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { format } from 'date-fns';
 import {
   AlertCircle,
@@ -42,6 +42,7 @@ export default function TeacherAttendance() {
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [lessonTopic, setLessonTopic] = useState('');
   const [attendanceMap, setAttendanceMap] = useState<Record<number, PenaltyValue | null>>({});
+  const [gradeMap, setGradeMap] = useState<Record<number, string>>({});
   const [enrolledStudentIds, setEnrolledStudentIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -49,6 +50,7 @@ export default function TeacherAttendance() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [isEditingMode, setIsEditingMode] = useState(false);
+  const [isLessonDrawerOpen, setIsLessonDrawerOpen] = useState(false);
 
   const userId = localStorage.getItem('user_id');
   const teacherId = userId ? parseInt(userId, 10) : NaN;
@@ -73,19 +75,26 @@ export default function TeacherAttendance() {
 
   const loadEnrollments = async (courseId: number) => {
     const enrollments = await api.getEnrollments(courseId);
-    setEnrolledStudentIds(new Set(enrollments.map((item: any) => item.student_id)));
+    setEnrolledStudentIds(new Set(
+      enrollments
+        .map((item: any) => item.student_id)
+        .filter((studentId: number | null | undefined): studentId is number => typeof studentId === 'number')
+    ));
   };
 
   const selectLesson = async (lesson: Lesson) => {
     setSelectedLesson(lesson);
     const lessonAttendance = await api.getAttendance({ lessonId: lesson.id });
     const mapped: Record<number, PenaltyValue | null> = {};
+    const mappedGrades: Record<number, string> = {};
 
     lessonAttendance.forEach((record: any) => {
       mapped[record.student_id] = penaltyFromAttendanceRecord(record);
+      mappedGrades[record.student_id] = record?.grade === null || record?.grade === undefined ? '' : String(record.grade);
     });
 
     setAttendanceMap(mapped);
+    setGradeMap(mappedGrades);
     setIsEditingMode(!lesson.attendance_saved);
   };
 
@@ -102,6 +111,7 @@ export default function TeacherAttendance() {
     } else {
       setSelectedLesson(null);
       setAttendanceMap({});
+      setGradeMap({});
       setIsEditingMode(false);
     }
   };
@@ -111,6 +121,7 @@ export default function TeacherAttendance() {
     setLessonTopic('');
     setSearchTerm('');
     setStatusFilter('all');
+    setGradeMap({});
     if (preloadedStudents) {
       setStudents(preloadedStudents);
     }
@@ -147,7 +158,14 @@ export default function TeacherAttendance() {
     return { zero, two, four, unmarked };
   }, [attendanceMap, courseStudents.length]);
 
-  const hasMarkedAllStudents = courseStudents.length > 0 && courseStudents.every((student) => attendanceMap[student.id as number] !== null && attendanceMap[student.id as number] !== undefined);
+  const hasMarkedAllStudents = courseStudents.length > 0 && courseStudents.every((student) => {
+    const studentId = student.id as number;
+    const grade = gradeMap[studentId];
+    return attendanceMap[studentId] !== null
+      && attendanceMap[studentId] !== undefined
+      && grade !== undefined
+      && grade.trim() !== '';
+  });
   const canEditAttendance = Boolean(selectedLesson && selectedLesson.attendance_saved && !selectedLesson.attendance_edit_used && !isEditingMode);
   const isReadOnly = !selectedLesson || (selectedLesson.attendance_saved && !isEditingMode);
 
@@ -167,6 +185,7 @@ export default function TeacherAttendance() {
       setCreatingLesson(true);
       const createdLesson = await api.createLesson({ course_id: selectedCourse.id as number, topic });
       setLessonTopic('');
+      setIsLessonDrawerOpen(false);
       await loadLessons(selectedCourse.id as number, createdLesson.id);
       toast.success('Lesson yaratildi. Endi davomat olishingiz mumkin.');
     } catch (error: any) {
@@ -179,6 +198,12 @@ export default function TeacherAttendance() {
   const handleSelectPenalty = (studentId: number, value: PenaltyValue) => {
     if (isReadOnly) return;
     setAttendanceMap((prev) => ({ ...prev, [studentId]: value }));
+  };
+
+  const handleScoreChange = (studentId: number, value: string) => {
+    if (isReadOnly) return;
+    if (value !== '' && !/^\d{0,3}(\.\d{0,2})?$/.test(value)) return;
+    setGradeMap((prev) => ({ ...prev, [studentId]: value }));
   };
 
   const handleStartEdit = () => {
@@ -200,13 +225,14 @@ export default function TeacherAttendance() {
     }
 
     if (!hasMarkedAllStudents) {
-      toast.error("Saqlashdan oldin barcha o'quvchilarga 0/2/4 belgilang");
+      toast.error("Saqlashdan oldin barcha o'quvchilarga davomat va baho kiriting");
       return;
     }
 
     const records: LessonAttendanceEntry[] = courseStudents.map((student) => ({
       student_id: student.id as number,
       penalty_hours: attendanceMap[student.id as number] as PenaltyValue,
+      grade: Number(gradeMap[student.id as number]),
     }));
 
     try {
@@ -262,26 +288,6 @@ export default function TeacherAttendance() {
               ))}
             </select>
           </div>
-
-          <div>
-            <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Lesson qo‘shish</label>
-            <div className="flex gap-2">
-              <input
-                value={lessonTopic}
-                onChange={(event) => setLessonTopic(event.target.value)}
-                placeholder="Bugungi mavzu nomi"
-                className="flex-1 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-cyan-500/60"
-              />
-              <button
-                onClick={handleCreateLesson}
-                disabled={!selectedCourse || creatingLesson}
-                className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-3 font-black text-white shadow-lg shadow-cyan-700/30 transition hover:-translate-y-0.5 disabled:opacity-50"
-              >
-                <Plus className="h-4 w-4" />
-                {creatingLesson ? 'Yaratilmoqda...' : 'Lesson add'}
-              </button>
-            </div>
-          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -298,9 +304,19 @@ export default function TeacherAttendance() {
             <p className="text-xl font-black text-white">Lessonlar</p>
             <p className="text-sm text-slate-400">Sana va vaqt avtomatik yoziladi. Davomat faqat lesson yaratilgandan keyin olinadi.</p>
           </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-300">
-            <CalendarDays className="h-4 w-4 text-cyan-400" />
-            {lessons.length} ta lesson
+          <div className="flex items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-300">
+              <CalendarDays className="h-4 w-4 text-cyan-400" />
+              {lessons.length} ta lesson
+            </div>
+            <button
+              onClick={() => setIsLessonDrawerOpen(true)}
+              disabled={!selectedCourse}
+              className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-cyan-700/30 transition hover:-translate-y-0.5 disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+              Lesson add
+            </button>
           </div>
         </div>
 
@@ -377,7 +393,7 @@ export default function TeacherAttendance() {
           {!selectedLesson.attendance_saved ? (
             <div className="flex items-center gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-cyan-100">
               <AlertCircle className="h-5 w-5 flex-shrink-0 text-cyan-300" />
-              <p className="text-sm font-semibold">Bu lesson uchun davomat hali saqlanmagan. Barcha o‘quvchilarga 0/2/4 tanlab, so‘ng Save bosing.</p>
+              <p className="text-sm font-semibold">Bu lesson uchun davomat hali saqlanmagan. Barcha o‘quvchilarga 0/2/4 va baho kiritib, so‘ng Save bosing.</p>
             </div>
           ) : isEditingMode ? (
             <div className="flex items-center gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-100">
@@ -403,9 +419,10 @@ export default function TeacherAttendance() {
             </div>
           ) : (
             <div className="space-y-3">
-              <div className="hidden grid-cols-[1.2fr_220px_120px] gap-4 rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] font-black uppercase tracking-[0.18em] text-slate-500 md:grid">
+              <div className="hidden grid-cols-[1.2fr_220px_140px_120px] gap-4 rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] font-black uppercase tracking-[0.18em] text-slate-500 md:grid">
                 <span>O‘quvchi</span>
                 <span>Davomat tanlash</span>
+                <span>Baho</span>
                 <span className="text-right">Natija</span>
               </div>
 
@@ -417,7 +434,7 @@ export default function TeacherAttendance() {
                       key={student.id}
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className={`grid grid-cols-1 gap-3 rounded-2xl border p-4 transition-all md:grid-cols-[1.2fr_220px_120px] ${
+                      className={`grid grid-cols-1 gap-3 rounded-2xl border p-4 transition-all md:grid-cols-[1.2fr_220px_140px_120px] ${
                         penalty === 0
                           ? 'border-emerald-500/35 bg-emerald-500/10'
                           : penalty === 2
@@ -448,66 +465,155 @@ export default function TeacherAttendance() {
                         <option value="4">4 — qatnashmadi</option>
                       </select>
 
+                      <div>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.5"
+                          value={gradeMap[student.id as number] ?? ''}
+                          onChange={(event) => handleScoreChange(student.id as number, event.target.value)}
+                          disabled={isReadOnly}
+                          placeholder="Baho"
+                          className={`w-full rounded-2xl border px-4 py-3 text-sm font-black outline-none transition ${
+                            isReadOnly
+                              ? 'cursor-not-allowed border-slate-800 bg-slate-900/60 text-slate-400'
+                              : 'border-slate-700 bg-slate-900 text-white focus:border-cyan-500/60'
+                          }`}
+                        />
+                      </div>
+
                       <div className="md:justify-self-end">
                         {penalty === null || penalty === undefined ? (
                           <span className="inline-flex rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-black text-slate-400">Belgilanmagan</span>
                         ) : (
-                          <span className={`inline-flex rounded-full border px-3 py-1.5 text-xs font-black ${PENALTY_OPTIONS.find((item) => item.value === penalty)?.className}`}>
-                            {penalty} soat
-                          </span>
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <span className={`inline-flex rounded-full border px-3 py-1.5 text-xs font-black ${PENALTY_OPTIONS.find((item) => item.value === penalty)?.className}`}>
+                              {penalty} soat
+                            </span>
+                            {(gradeMap[student.id as number] ?? '') !== '' && (
+                              <span className="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-black text-cyan-200">
+                                Baho: {gradeMap[student.id as number]}
+                              </span>
+                            )}
+                          </div>
                         )}
                       </div>
                     </motion.div>
                   );
                 })}
               </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-300 md:text-sm">
+                    <span>Lesson: <span className="font-black text-white">{selectedLesson.topic}</span></span>
+                    <span className="hidden text-slate-600 md:inline">•</span>
+                    <span>Belgilangani: <span className="font-black text-white">{Object.values(attendanceMap).filter((value) => value !== null && value !== undefined).length}</span> / {courseStudents.length}</span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {canEditAttendance && (
+                      <button
+                        onClick={handleStartEdit}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm font-black text-amber-200 transition hover:bg-amber-500/20"
+                      >
+                        <Edit3 className="h-4 w-4" /> Edit
+                      </button>
+                    )}
+
+                    {isEditingMode && selectedLesson.attendance_saved && (
+                      <button
+                        onClick={() => void handleCancelEdit()}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-black text-slate-200 transition hover:border-slate-600"
+                      >
+                        Bekor qilish
+                      </button>
+                    )}
+
+                    {(!selectedLesson.attendance_saved || isEditingMode) && (
+                      <button
+                        onClick={() => void handleSaveAttendance()}
+                        disabled={saving || !hasMarkedAllStudents}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-cyan-700/30 transition hover:-translate-y-0.5 disabled:opacity-50"
+                      >
+                        <Save className="h-4 w-4" />
+                        {saving ? 'Saqlanmoqda...' : 'Save'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
       )}
 
-      {selectedLesson && (
-        <div className="fixed bottom-4 left-1/2 z-30 w-[min(1100px,calc(100%-1.5rem))] -translate-x-1/2 rounded-3xl border border-slate-700/70 bg-slate-950/95 p-3 shadow-2xl shadow-black/40 backdrop-blur-xl">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-300 md:text-sm">
-              <span>Lesson: <span className="font-black text-white">{selectedLesson.topic}</span></span>
-              <span className="hidden text-slate-600 md:inline">•</span>
-              <span>Belgilangani: <span className="font-black text-white">{Object.values(attendanceMap).filter((value) => value !== null && value !== undefined).length}</span> / {courseStudents.length}</span>
-            </div>
+      <AnimatePresence>
+        {isLessonDrawerOpen && (
+          <>
+            <motion.button
+              type="button"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsLessonDrawerOpen(false)}
+              className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', stiffness: 280, damping: 30 }}
+              className="fixed left-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-r border-cyan-500/20 bg-slate-950 shadow-2xl shadow-black/50"
+            >
+              <div className="border-b border-slate-800 p-5">
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-300">Yangi lesson</p>
+                <h3 className="mt-2 text-2xl font-black text-white">Lesson qo‘shish</h3>
+                <p className="mt-2 text-sm text-slate-400">Mavzu nomini kiriting. Saqlangandan keyin darhol shu lesson ochiladi.</p>
+              </div>
 
-            <div className="flex flex-wrap gap-2">
-              {canEditAttendance && (
-                <button
-                  onClick={handleStartEdit}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm font-black text-amber-200 transition hover:bg-amber-500/20"
-                >
-                  <Edit3 className="h-4 w-4" /> Edit
-                </button>
-              )}
+              <div className="flex-1 space-y-4 p-5">
+                <div>
+                  <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Kurs</label>
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900 px-4 py-3 text-base font-black text-white">
+                    {selectedCourse?.name || 'Kurs tanlanmagan'}
+                  </div>
+                </div>
 
-              {isEditingMode && selectedLesson.attendance_saved && (
-                <button
-                  onClick={() => void handleCancelEdit()}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-black text-slate-200 transition hover:border-slate-600"
-                >
-                  Bekor qilish
-                </button>
-              )}
+                <div>
+                  <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Mavzu nomi</label>
+                  <textarea
+                    value={lessonTopic}
+                    onChange={(event) => setLessonTopic(event.target.value)}
+                    placeholder="Masalan: JavaScript object methods"
+                    rows={5}
+                    className="w-full resize-none rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-cyan-500/60"
+                  />
+                </div>
+              </div>
 
-              {(!selectedLesson.attendance_saved || isEditingMode) && (
-                <button
-                  onClick={() => void handleSaveAttendance()}
-                  disabled={saving || !hasMarkedAllStudents}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-cyan-700/30 transition hover:-translate-y-0.5 disabled:opacity-50"
-                >
-                  <Save className="h-4 w-4" />
-                  {saving ? 'Saqlanmoqda...' : 'Save'}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+              <div className="border-t border-slate-800 p-5">
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setIsLessonDrawerOpen(false)}
+                    className="flex-1 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-black text-slate-200 transition hover:border-slate-600"
+                  >
+                    Yopish
+                  </button>
+                  <button
+                    onClick={handleCreateLesson}
+                    disabled={!selectedCourse || creatingLesson}
+                    className="flex-1 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-cyan-700/30 transition hover:-translate-y-0.5 disabled:opacity-50"
+                  >
+                    {creatingLesson ? 'Yaratilmoqda...' : 'Lesson add'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

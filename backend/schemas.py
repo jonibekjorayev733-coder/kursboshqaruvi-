@@ -113,6 +113,7 @@ class Lesson(LessonBase):
 class LessonAttendanceEntry(BaseModel):
     student_id: int
     penalty_hours: int
+    grade: Optional[float] = None
 
 class LessonAttendanceSaveRequest(BaseModel):
     records: List[LessonAttendanceEntry]
