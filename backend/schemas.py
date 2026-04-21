@@ -96,6 +96,27 @@ class CourseEnrollment(CourseEnrollmentBase):
     enrolled_at: Optional[datetime] = None
     class Config: from_attributes = True
 
+class LessonBase(BaseModel):
+    course_id: int
+    topic: str
+
+class LessonCreate(LessonBase):
+    pass
+
+class Lesson(LessonBase):
+    id: int
+    created_at: Optional[datetime] = None
+    attendance_saved: bool = False
+    attendance_edit_used: bool = False
+    class Config: from_attributes = True
+
+class LessonAttendanceEntry(BaseModel):
+    student_id: int
+    penalty_hours: int
+
+class LessonAttendanceSaveRequest(BaseModel):
+    records: List[LessonAttendanceEntry]
+
 class AssignmentBase(BaseModel):
     title: str
     description: str
@@ -141,8 +162,10 @@ class AssignmentProgress(AssignmentProgressBase):
 class AttendanceBase(BaseModel):
     student_id: int
     course_id: int
+    lesson_id: Optional[int] = None
     date: str
     status: str
+    penalty_hours: Optional[int] = None
     late_minutes: Optional[int] = None
     grade: Optional[float] = None
 

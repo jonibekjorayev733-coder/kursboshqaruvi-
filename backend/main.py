@@ -328,10 +328,22 @@ async def realtime_events_ws(websocket: WebSocket, channel: str):
 def ensure_legacy_schema_compatibility():
     """Add missing columns for legacy databases so endpoints do not crash."""
     statements = [
+        """
+        CREATE TABLE IF NOT EXISTS lesson (
+            id SERIAL PRIMARY KEY,
+            course_id INTEGER NOT NULL REFERENCES course(id),
+            topic VARCHAR NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            attendance_saved BOOLEAN DEFAULT FALSE,
+            attendance_edit_used BOOLEAN DEFAULT FALSE
+        )
+        """,
         "ALTER TABLE IF EXISTS payment ADD COLUMN IF NOT EXISTS payment_method VARCHAR",
         "ALTER TABLE IF EXISTS payment ADD COLUMN IF NOT EXISTS payment_details JSON",
         "ALTER TABLE IF EXISTS payment ADD COLUMN IF NOT EXISTS created_at TIMESTAMP",
         "ALTER TABLE IF EXISTS payment ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
+        "ALTER TABLE IF EXISTS attendance ADD COLUMN IF NOT EXISTS lesson_id INTEGER",
+        "ALTER TABLE IF EXISTS attendance ADD COLUMN IF NOT EXISTS penalty_hours INTEGER",
         "ALTER TABLE IF EXISTS assignment ADD COLUMN IF NOT EXISTS submitted BOOLEAN DEFAULT FALSE",
         "ALTER TABLE IF EXISTS assignment ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP",
         "ALTER TABLE IF EXISTS assignment ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
@@ -407,12 +419,12 @@ def sync_table_id_sequence(db: Session, table_name: str):
 
 
 def sync_critical_sequences_with_connection(conn):
-    for table_name in ("notification", "attendance", "assignment_progress", "course_enrollment", "course", "student", "payment"):
+    for table_name in ("notification", "attendance", "assignment_progress", "course_enrollment", "course", "student", "payment", "lesson"):
         sync_table_id_sequence_with_connection(conn, table_name)
 
 
 def sync_critical_sequences(db: Session):
-    for table_name in ("notification", "attendance", "assignment_progress", "course_enrollment", "course", "student", "payment"):
+    for table_name in ("notification", "attendance", "assignment_progress", "course_enrollment", "course", "student", "payment", "lesson"):
         sync_table_id_sequence(db, table_name)
 
 
@@ -429,10 +441,19 @@ def sync_notification_id_sequence(db: Session):
 @app.on_event("startup")
 def startup_schema_compatibility():
     """Keep startup non-blocking so Render can detect an open port quickly."""
-    pass
+    ensure_legacy_schema_compatibility()
 
 
 ALLOWED_ASSIGNMENT_STATUSES = {"accepted", "in_progress", "completed"}
+ALLOWED_ATTENDANCE_HOURS = {0, 2, 4}
+
+
+def attendance_status_from_penalty_hours(penalty_hours: int) -> str:
+    if penalty_hours == 0:
+        return "present"
+    if penalty_hours == 2:
+        return "late"
+    return "absent"
 
 
 def create_teacher_status_notification(
@@ -626,6 +647,7 @@ def delete_course(course_id: int, db: Session = Depends(get_db)):
         db.query(models.Payment).filter(models.Payment.course_id == course_id).delete(synchronize_session=False)
         db.query(models.CourseEnrollment).filter(models.CourseEnrollment.course_id == course_id).delete(synchronize_session=False)
         db.query(models.Attendance).filter(models.Attendance.course_id == course_id).delete(synchronize_session=False)
+        db.query(models.Lesson).filter(models.Lesson.course_id == course_id).delete(synchronize_session=False)
         db.query(models.Performance).filter(models.Performance.course_id == course_id).delete(synchronize_session=False)
 
         db.delete(db_course)
@@ -1034,6 +1056,7 @@ def read_attendance(
     course_id: Optional[int] = None,
     student_id: Optional[int] = None,
     date: Optional[str] = None,
+    lesson_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
     query = db.query(models.Attendance).filter(
@@ -1048,7 +1071,107 @@ def read_attendance(
         query = query.filter(models.Attendance.student_id == student_id)
     if date is not None:
         query = query.filter(models.Attendance.date == date)
+    if lesson_id is not None:
+        query = query.filter(models.Attendance.lesson_id == lesson_id)
     return query.all()
+
+@app.get("/lessons/", response_model=List[schemas.Lesson])
+def read_lessons(course_id: Optional[int] = None, db: Session = Depends(get_db)):
+    query = db.query(models.Lesson)
+    if course_id is not None:
+        query = query.filter(models.Lesson.course_id == course_id)
+    return query.order_by(models.Lesson.created_at.desc(), models.Lesson.id.desc()).all()
+
+@app.post("/lessons/", response_model=schemas.Lesson)
+def create_lesson(lesson: schemas.LessonCreate, db: Session = Depends(get_db)):
+    topic = lesson.topic.strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="Lesson topic is required")
+
+    course_exists = db.query(models.Course.id).filter(models.Course.id == lesson.course_id).first()
+    if not course_exists:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    sync_table_id_sequence(db, "lesson")
+    db_lesson = models.Lesson(course_id=lesson.course_id, topic=topic)
+    db.add(db_lesson)
+    db.commit()
+    db.refresh(db_lesson)
+    return db_lesson
+
+@app.post("/lessons/{lesson_id}/attendance/save", response_model=List[schemas.Attendance])
+def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSaveRequest, db: Session = Depends(get_db)):
+    db_lesson = db.query(models.Lesson).filter(models.Lesson.id == lesson_id).first()
+    if db_lesson is None:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+
+    if not payload.records:
+        raise HTTPException(status_code=400, detail="Attendance records are required")
+
+    is_edit_mode = bool(db_lesson.attendance_saved)
+    if is_edit_mode and db_lesson.attendance_edit_used:
+        raise HTTPException(status_code=400, detail="Attendance for this lesson can only be edited once")
+
+    enrollment_rows = db.query(models.CourseEnrollment.student_id).filter(
+        models.CourseEnrollment.course_id == db_lesson.course_id
+    ).all()
+    enrolled_student_ids = {row[0] for row in enrollment_rows}
+    submitted_student_ids = {item.student_id for item in payload.records}
+
+    if enrolled_student_ids and submitted_student_ids != enrolled_student_ids:
+        missing = len(enrolled_student_ids - submitted_student_ids)
+        extra = len(submitted_student_ids - enrolled_student_ids)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Attendance barcha o'quvchilar uchun olinishi kerak (missing={missing}, extra={extra})",
+        )
+
+    lesson_date = db_lesson.created_at.strftime("%Y-%m-%d") if db_lesson.created_at else datetime.utcnow().strftime("%Y-%m-%d")
+    saved_records = []
+
+    for item in payload.records:
+        if item.penalty_hours not in ALLOWED_ATTENDANCE_HOURS:
+            raise HTTPException(status_code=400, detail="Attendance qiymati faqat 0, 2 yoki 4 bo'lishi mumkin")
+
+        existing = db.query(models.Attendance).filter(
+            models.Attendance.lesson_id == lesson_id,
+            models.Attendance.student_id == item.student_id,
+        ).first()
+
+        status_value = attendance_status_from_penalty_hours(item.penalty_hours)
+        if existing:
+            existing.course_id = db_lesson.course_id
+            existing.date = lesson_date
+            existing.status = status_value
+            existing.penalty_hours = item.penalty_hours
+            existing.late_minutes = None
+            existing.grade = None
+            saved_records.append(existing)
+            continue
+
+        sync_table_id_sequence(db, "attendance")
+        db_attendance = models.Attendance(
+            student_id=item.student_id,
+            course_id=db_lesson.course_id,
+            lesson_id=lesson_id,
+            date=lesson_date,
+            status=status_value,
+            penalty_hours=item.penalty_hours,
+            late_minutes=None,
+            grade=None,
+        )
+        db.add(db_attendance)
+        saved_records.append(db_attendance)
+
+    if is_edit_mode:
+        db_lesson.attendance_edit_used = True
+    else:
+        db_lesson.attendance_saved = True
+
+    db.commit()
+
+    refreshed = db.query(models.Attendance).filter(models.Attendance.lesson_id == lesson_id).all()
+    return refreshed
 
 @app.post("/attendance/", response_model=schemas.Attendance)
 def create_attendance(attendance: schemas.AttendanceCreate, db: Session = Depends(get_db)):

@@ -208,6 +208,20 @@ export interface TeacherTaskNotificationFeed {
     completed: TeacherTaskNotificationItem[];
 }
 
+export interface Lesson {
+    id?: number;
+    course_id: number;
+    topic: string;
+    created_at?: string;
+    attendance_saved?: boolean;
+    attendance_edit_used?: boolean;
+}
+
+export interface LessonAttendanceEntry {
+    student_id: number;
+    penalty_hours: 0 | 2 | 4;
+}
+
 export type NotificationSocketEvent = {
     event: 'notification.created';
     notification: Notification;
@@ -550,13 +564,61 @@ export const api = {
     },
 
     // Attendance
-    async getAttendance(filters?: { courseId?: number; studentId?: number; date?: string }): Promise<any[]> {
+    async getAttendance(filters?: { courseId?: number; studentId?: number; date?: string; lessonId?: number }): Promise<any[]> {
         const params = new URLSearchParams();
         if (filters?.courseId !== undefined) params.append('course_id', String(filters.courseId));
         if (filters?.studentId !== undefined) params.append('student_id', String(filters.studentId));
         if (filters?.date) params.append('date', filters.date);
+        if (filters?.lessonId !== undefined) params.append('lesson_id', String(filters.lessonId));
         const suffix = params.toString() ? `?${params.toString()}` : '';
         return cachedGetJson<any[]>(`${API_URL}/attendance/${suffix}`);
+    },
+
+    async getLessons(courseId?: number): Promise<Lesson[]> {
+        const params = new URLSearchParams();
+        if (courseId !== undefined) params.append('course_id', String(courseId));
+        const suffix = params.toString() ? `?${params.toString()}` : '';
+        return cachedGetJson<Lesson[]>(`${API_URL}/lessons/${suffix}`);
+    },
+
+    async createLesson(payload: { course_id: number; topic: string }): Promise<Lesson> {
+        const response = await fetch(`${API_URL}/lessons/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+            let errorMessage = 'Failed to create lesson';
+            try {
+                const body = await response.json();
+                if (body?.detail) errorMessage = String(body.detail);
+            } catch {
+                const raw = await response.text();
+                if (raw) errorMessage = raw;
+            }
+            throw new Error(errorMessage);
+        }
+        return response.json();
+    },
+
+    async saveLessonAttendance(lessonId: number, records: LessonAttendanceEntry[]): Promise<any[]> {
+        const response = await fetch(`${API_URL}/lessons/${lessonId}/attendance/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ records }),
+        });
+        if (!response.ok) {
+            let errorMessage = 'Failed to save lesson attendance';
+            try {
+                const body = await response.json();
+                if (body?.detail) errorMessage = String(body.detail);
+            } catch {
+                const raw = await response.text();
+                if (raw) errorMessage = raw;
+            }
+            throw new Error(errorMessage);
+        }
+        return response.json();
     },
 
     async createAttendance(attendance: any): Promise<any> {

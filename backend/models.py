@@ -60,7 +60,20 @@ class Course(Base):
     # Relationships
     teacher = relationship("Teacher", back_populates="courses")
     enrollments = relationship("CourseEnrollment", back_populates="course")
+    lessons = relationship("Lesson", back_populates="course")
     assignments = relationship("Assignment", back_populates="course")
+
+class Lesson(Base):
+    __tablename__ = "lesson"
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("course.id"), nullable=False, index=True)
+    topic = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    attendance_saved = Column(Boolean, default=False)
+    attendance_edit_used = Column(Boolean, default=False)
+
+    course = relationship("Course", back_populates="lessons")
+    attendance_records = relationship("Attendance", back_populates="lesson")
 
 class CourseEnrollment(Base):
     __tablename__ = "course_enrollment"
@@ -78,10 +91,14 @@ class Attendance(Base):
     id = Column(Integer, primary_key=True, index=True)
     student_id = Column(Integer)
     course_id = Column(Integer)
+    lesson_id = Column(Integer, ForeignKey("lesson.id"), nullable=True)
     date = Column(String)
     status = Column(String)
+    penalty_hours = Column(Integer, nullable=True)
     late_minutes = Column(Integer, nullable=True)
     grade = Column(Float, nullable=True)
+
+    lesson = relationship("Lesson", back_populates="attendance_records")
 
 class Performance(Base):
     __tablename__ = "performance"
