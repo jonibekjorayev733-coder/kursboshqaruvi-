@@ -561,11 +561,11 @@ export default function TeacherAttendance() {
               className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm"
             />
             <motion.div
-              initial={{ x: '-100%' }}
+              initial={{ x: '100%' }}
               animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
+              exit={{ x: '100%' }}
               transition={{ type: 'spring', stiffness: 280, damping: 30 }}
-              className="fixed left-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-r border-cyan-500/20 bg-slate-950 shadow-2xl shadow-black/50"
+              className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-cyan-500/20 bg-slate-950 shadow-2xl shadow-black/50"
             >
               <div className="border-b border-slate-800 p-5">
                 <p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-300">Yangi lesson</p>
