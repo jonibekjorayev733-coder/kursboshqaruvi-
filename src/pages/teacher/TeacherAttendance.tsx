@@ -61,17 +61,52 @@ export default function TeacherAttendance() {
       return;
     }
 
+    let cancelled = false;
     Promise.all([api.getCourses(teacherId), api.getStudents()])
       .then(async ([courseData, studentData]) => {
+        if (cancelled) return;
         setCourses(courseData);
         setStudents(studentData);
         if (courseData.length > 0) {
-          await handleCourseChange(courseData[0], studentData);
+          const course = courseData[0];
+          setSelectedCourse(course);
+          setLessonTopic('');
+          setSearchTerm('');
+          setStatusFilter('all');
+          setGradeMap({});
+          setStudents(studentData);
+          const [enrollments, lessonData] = await Promise.all([
+            api.getEnrollments(course.id as number),
+            api.getLessons(course.id as number),
+          ]);
+          if (cancelled) return;
+          setEnrolledStudentIds(new Set(
+            enrollments
+              .map((item: any) => item.student_id)
+              .filter((sid: number | null | undefined): sid is number => typeof sid === 'number')
+          ));
+          setLessons(lessonData);
+          if (lessonData.length > 0) {
+            const lesson = lessonData[0];
+            setSelectedLesson(lesson);
+            const lessonAttendance = await api.getAttendance({ lessonId: lesson.id });
+            if (cancelled) return;
+            const mapped: Record<number, PenaltyValue | null> = {};
+            const mappedGrades: Record<number, string> = {};
+            lessonAttendance.forEach((record: any) => {
+              mapped[record.student_id] = penaltyFromAttendanceRecord(record);
+              mappedGrades[record.student_id] = record?.grade === null || record?.grade === undefined ? '' : String(record.grade);
+            });
+            setAttendanceMap(mapped);
+            setGradeMap(mappedGrades);
+            setIsEditingMode(!lesson.attendance_saved);
+          }
         }
       })
       .catch(() => toast.error("Davomat sahifasi uchun ma'lumotlarni yuklab bo'lmadi"))
-      .finally(() => setLoading(false));
-  }, [teacherId]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [teacherId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadEnrollments = async (courseId: number) => {
     const enrollments = await api.getEnrollments(courseId);
@@ -160,11 +195,7 @@ export default function TeacherAttendance() {
 
   const hasMarkedAllStudents = courseStudents.length > 0 && courseStudents.every((student) => {
     const studentId = student.id as number;
-    const grade = gradeMap[studentId];
-    return attendanceMap[studentId] !== null
-      && attendanceMap[studentId] !== undefined
-      && grade !== undefined
-      && grade.trim() !== '';
+    return attendanceMap[studentId] !== null && attendanceMap[studentId] !== undefined;
   });
   const canEditAttendance = Boolean(selectedLesson && selectedLesson.attendance_saved && !selectedLesson.attendance_edit_used && !isEditingMode);
   const isReadOnly = !selectedLesson || (selectedLesson.attendance_saved && !isEditingMode);
@@ -229,11 +260,15 @@ export default function TeacherAttendance() {
       return;
     }
 
-    const records: LessonAttendanceEntry[] = courseStudents.map((student) => ({
-      student_id: student.id as number,
-      penalty_hours: attendanceMap[student.id as number] as PenaltyValue,
-      grade: Number(gradeMap[student.id as number]),
-    }));
+    const records: LessonAttendanceEntry[] = courseStudents.map((student) => {
+      const gradeStr = gradeMap[student.id as number];
+      const gradeVal = gradeStr !== undefined && gradeStr.trim() !== '' ? Number(gradeStr) : undefined;
+      return {
+        student_id: student.id as number,
+        penalty_hours: attendanceMap[student.id as number] as PenaltyValue,
+        score: gradeVal,
+      };
+    });
 
     try {
       setSaving(true);

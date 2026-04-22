@@ -344,6 +344,7 @@ def ensure_legacy_schema_compatibility():
         "ALTER TABLE IF EXISTS payment ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
         "ALTER TABLE IF EXISTS attendance ADD COLUMN IF NOT EXISTS lesson_id INTEGER",
         "ALTER TABLE IF EXISTS attendance ADD COLUMN IF NOT EXISTS penalty_hours INTEGER",
+        "ALTER TABLE IF EXISTS attendance ADD COLUMN IF NOT EXISTS grade FLOAT",
         "ALTER TABLE IF EXISTS assignment ADD COLUMN IF NOT EXISTS submitted BOOLEAN DEFAULT FALSE",
         "ALTER TABLE IF EXISTS assignment ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP",
         "ALTER TABLE IF EXISTS assignment ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
@@ -1132,9 +1133,7 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
     for item in payload.records:
         if item.penalty_hours not in ALLOWED_ATTENDANCE_HOURS:
             raise HTTPException(status_code=400, detail="Attendance qiymati faqat 0, 2 yoki 4 bo'lishi mumkin")
-        if item.grade is None:
-            raise HTTPException(status_code=400, detail="Har bir o'quvchi uchun baho kiritilishi kerak")
-        if item.grade < 0 or item.grade > 100:
+        if item.grade is not None and (item.grade < 0 or item.grade > 100):
             raise HTTPException(status_code=400, detail="Baho 0 dan 100 gacha bo'lishi kerak")
 
         existing = db.query(models.Attendance).filter(
