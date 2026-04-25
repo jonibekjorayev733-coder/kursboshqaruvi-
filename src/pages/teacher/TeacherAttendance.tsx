@@ -75,16 +75,32 @@ export default function TeacherAttendance() {
   const teacherId = userId ? parseInt(userId, 10) : NaN;
 
   const currentMonthDate = useMemo(() => new Date(now.getFullYear(), now.getMonth(), 1), [now]);
-  const previousMonthDate = useMemo(() => new Date(now.getFullYear(), now.getMonth() - 1, 1), [now]);
   const currentMonthKey = useMemo(() => monthKeyFromDate(currentMonthDate.toISOString()), [currentMonthDate]);
-  const previousMonthKey = useMemo(() => monthKeyFromDate(previousMonthDate.toISOString()), [previousMonthDate]);
-  const monthOptions = useMemo(
-    () => [
-      { key: currentMonthKey, label: format(currentMonthDate, 'MMMM yyyy') },
-      { key: previousMonthKey, label: format(previousMonthDate, 'MMMM yyyy') },
-    ],
-    [currentMonthDate, currentMonthKey, previousMonthDate, previousMonthKey],
-  );
+
+  // Build month options: all months that have lessons + current month, up to current month only (no future)
+  const monthOptions = useMemo(() => {
+    const seenKeys = new Set<string>();
+    const options: { key: string; label: string }[] = [];
+
+    // Always include current month first
+    const curKey = currentMonthKey;
+    seenKeys.add(curKey);
+    options.push({ key: curKey, label: format(currentMonthDate, 'MMMM yyyy') });
+
+    // Add months from existing lessons (only if <= current month)
+    lessons.forEach((lesson) => {
+      const mk = monthKeyFromDate(lesson.created_at);
+      if (!mk || seenKeys.has(mk) || mk > curKey) return;
+      seenKeys.add(mk);
+      options.push({ key: mk, label: format(new Date(mk + '-01'), 'MMMM yyyy') });
+    });
+
+    // Sort descending (newest first)
+    options.sort((a, b) => b.key.localeCompare(a.key));
+    return options;
+  }, [currentMonthDate, currentMonthKey, lessons]);
+
+  const isCurrentMonthSelected = selectedMonthKey === currentMonthKey;
 
   const visibleLessons = useMemo(
     () => lessons.filter((lesson) => monthKeyFromDate(lesson.created_at) === selectedMonthKey),
@@ -267,7 +283,10 @@ export default function TeacherAttendance() {
       return;
     }
 
-    const topic = lessonTopic.trim();
+    if (!isCurrentMonthSelected) {
+      toast.error('O‘tgan oylarga lesson qo‘shib bo‘lmaydi — faqat ko‘rish mumkin');
+      return;
+    }
     if (!topic) {
       toast.error('Lesson mavzusini kiriting');
       return;
@@ -441,14 +460,23 @@ export default function TeacherAttendance() {
             </select>
             <button
               onClick={() => {
+                if (!isCurrentMonthSelected) {
+                  toast.error('O‘tgan oylarga lesson qo‘shib bo‘lmaydi — faqat ko‘rish mumkin');
+                  return;
+                }
                 setLessonDateTime(toLocalDatetimeInputValue(new Date()));
                 setIsLessonDrawerOpen(true);
               }}
               disabled={!selectedCourse}
-              className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-cyan-700/30 transition hover:-translate-y-0.5 disabled:opacity-50"
+              title={!isCurrentMonthSelected ? 'O‘tgan oy — faqat ko‘rish' : 'Yangi lesson qo‘shish'}
+              className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-black text-white shadow-lg transition hover:-translate-y-0.5 disabled:opacity-50 ${
+                isCurrentMonthSelected
+                  ? 'bg-gradient-to-r from-cyan-600 to-blue-600 shadow-cyan-700/30'
+                  : 'bg-slate-700 cursor-not-allowed opacity-60'
+              }`}
             >
               <Plus className="h-4 w-4" />
-              Lesson add
+              {isCurrentMonthSelected ? 'Lesson add' : 'Faqat ko‘rish'}
             </button>
           </div>
         </div>
