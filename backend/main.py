@@ -1097,8 +1097,8 @@ def create_lesson(lesson: schemas.LessonCreate, db: Session = Depends(get_db)):
     if scheduled_at is not None:
         if scheduled_at.tzinfo is not None:
             scheduled_at = scheduled_at.astimezone(timezone.utc).replace(tzinfo=None)
-        if scheduled_at < datetime.utcnow():
-            raise HTTPException(status_code=400, detail="Lesson vaqtini o'tgan sana/soatga qo'yib bo'lmaydi")
+        if scheduled_at.date() != datetime.utcnow().date():
+            raise HTTPException(status_code=400, detail="Lesson faqat bugungi sana uchun yaratilishi mumkin")
 
     sync_table_id_sequence(db, "lesson")
     db_lesson = models.Lesson(

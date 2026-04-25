@@ -50,6 +50,12 @@ function toLocalDatetimeInputValue(date: Date) {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
+function isSameLocalDay(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate();
+}
+
 export default function TeacherAttendance() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -287,6 +293,7 @@ export default function TeacherAttendance() {
       toast.error('O‘tgan oylarga lesson qo‘shib bo‘lmaydi — faqat ko‘rish mumkin');
       return;
     }
+    const topic = lessonTopic.trim();
     if (!topic) {
       toast.error('Lesson mavzusini kiriting');
       return;
@@ -303,8 +310,8 @@ export default function TeacherAttendance() {
       return;
     }
 
-    if (scheduledAt.getTime() < Date.now()) {
-      toast.error('O‘tgan vaqtga lesson qo‘shib bo‘lmaydi');
+    if (!isSameLocalDay(scheduledAt, now)) {
+      toast.error('Faqat bugungi kunga lesson qo‘shish mumkin');
       return;
     }
 
@@ -313,7 +320,7 @@ export default function TeacherAttendance() {
       const createdLesson = await api.createLesson({
         course_id: selectedCourse.id as number,
         topic,
-        lesson_datetime: scheduledAt.toISOString(),
+        lesson_datetime: lessonDateTime,
       });
       setLessonTopic('');
       setLessonDateTime(toLocalDatetimeInputValue(new Date()));
@@ -758,11 +765,12 @@ export default function TeacherAttendance() {
                   <input
                     type="datetime-local"
                     value={lessonDateTime}
-                    min={toLocalDatetimeInputValue(now)}
+                    min={toLocalDatetimeInputValue(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0))}
+                    max={toLocalDatetimeInputValue(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59))}
                     onChange={(event) => setLessonDateTime(event.target.value)}
                     className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base font-semibold text-white outline-none transition focus:border-cyan-500/60"
                   />
-                  <p className="mt-2 text-xs text-slate-500">Faqat hozirgi yoki kelajak vaqtga lesson qo‘shiladi.</p>
+                  <p className="mt-2 text-xs text-slate-500">Faqat bugungi sana ichida lesson qo‘shiladi. Kecha va ertaga qo‘shib bo‘lmaydi.</p>
                 </div>
               </div>
 
