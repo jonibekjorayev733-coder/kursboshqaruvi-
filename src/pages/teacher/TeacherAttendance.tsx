@@ -463,15 +463,6 @@ export default function TeacherAttendance() {
             <div className="rounded-2xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-cyan-200">
               Hozir: {format(now, 'dd MMM yyyy • HH:mm:ss')}
             </div>
-            <select
-              value={selectedMonthKey}
-              onChange={(event) => setSelectedMonthKey(event.target.value)}
-              className="rounded-2xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-white outline-none transition focus:border-cyan-500/60"
-            >
-              {monthOptions.map((option) => (
-                <option key={option.key} value={option.key}>{option.label}</option>
-              ))}
-            </select>
             <button
               onClick={() => {
                 if (!isCurrentMonthSelected) {
@@ -493,6 +484,26 @@ export default function TeacherAttendance() {
               {isCurrentMonthSelected ? 'Lesson add' : 'Faqat ko‘rish'}
             </button>
           </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {monthOptions.map((option) => {
+            const isActive = option.key === selectedMonthKey;
+            return (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setSelectedMonthKey(option.key)}
+                className={`rounded-full border px-4 py-2 text-xs font-black transition ${
+                  isActive
+                    ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-200 shadow-lg shadow-cyan-900/20'
+                    : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
         </div>
 
         {visibleLessons.length === 0 ? (
