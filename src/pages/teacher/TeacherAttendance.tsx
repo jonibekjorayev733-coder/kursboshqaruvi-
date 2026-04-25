@@ -83,26 +83,33 @@ export default function TeacherAttendance() {
   const currentMonthDate = useMemo(() => new Date(now.getFullYear(), now.getMonth(), 1), [now]);
   const currentMonthKey = useMemo(() => monthKeyFromDate(currentMonthDate.toISOString()), [currentMonthDate]);
 
-  // Build month options: all months that have lessons + current month, up to current month only (no future)
+  // Build month options: all past months from the earliest lesson month (or Jan of current year)
+  // through the current month, with no future months.
   const monthOptions = useMemo(() => {
-    const seenKeys = new Set<string>();
     const options: { key: string; label: string }[] = [];
 
-    // Always include current month first
-    const curKey = currentMonthKey;
-    seenKeys.add(curKey);
-    options.push({ key: curKey, label: format(currentMonthDate, 'MMMM yyyy') });
+    const lessonMonthDates = lessons
+      .map((lesson) => {
+        const parsed = lesson.created_at ? new Date(lesson.created_at) : null;
+        if (!parsed || Number.isNaN(parsed.getTime())) return null;
+        return new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+      })
+      .filter((item): item is Date => item !== null)
+      .sort((left, right) => left.getTime() - right.getTime());
 
-    // Add months from existing lessons (only if <= current month)
-    lessons.forEach((lesson) => {
-      const mk = monthKeyFromDate(lesson.created_at);
-      if (!mk || seenKeys.has(mk) || mk > curKey) return;
-      seenKeys.add(mk);
-      options.push({ key: mk, label: format(new Date(mk + '-01'), 'MMMM yyyy') });
-    });
+    const fallbackStart = new Date(currentMonthDate.getFullYear(), 0, 1);
+    const startMonthDate = lessonMonthDates[0] ?? fallbackStart;
 
-    // Sort descending (newest first)
-    options.sort((a, b) => b.key.localeCompare(a.key));
+    for (
+      let cursor = new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth(), 1);
+      cursor.getTime() >= startMonthDate.getTime();
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1)
+    ) {
+      const key = monthKeyFromDate(cursor.toISOString());
+      if (!key) continue;
+      options.push({ key, label: format(cursor, 'MMMM yyyy') });
+    }
+
     return options;
   }, [currentMonthDate, currentMonthKey, lessons]);
 
