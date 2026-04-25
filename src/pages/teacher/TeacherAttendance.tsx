@@ -83,35 +83,20 @@ export default function TeacherAttendance() {
   const currentMonthDate = useMemo(() => new Date(now.getFullYear(), now.getMonth(), 1), [now]);
   const currentMonthKey = useMemo(() => monthKeyFromDate(currentMonthDate.toISOString()), [currentMonthDate]);
 
-  // Build month options: all past months from the earliest lesson month (or Jan of current year)
-  // through the current month, with no future months.
+  // Always show a visible historical range (last 12 months including current month).
+  // This keeps previous months selectable even when there is no lesson data in those months.
   const monthOptions = useMemo(() => {
     const options: { key: string; label: string }[] = [];
 
-    const lessonMonthDates = lessons
-      .map((lesson) => {
-        const parsed = lesson.created_at ? new Date(lesson.created_at) : null;
-        if (!parsed || Number.isNaN(parsed.getTime())) return null;
-        return new Date(parsed.getFullYear(), parsed.getMonth(), 1);
-      })
-      .filter((item): item is Date => item !== null)
-      .sort((left, right) => left.getTime() - right.getTime());
-
-    const fallbackStart = new Date(currentMonthDate.getFullYear(), 0, 1);
-    const startMonthDate = lessonMonthDates[0] ?? fallbackStart;
-
-    for (
-      let cursor = new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth(), 1);
-      cursor.getTime() >= startMonthDate.getTime();
-      cursor = new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1)
-    ) {
+    for (let offset = 0; offset < 12; offset += 1) {
+      const cursor = new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth() - offset, 1);
       const key = monthKeyFromDate(cursor.toISOString());
       if (!key) continue;
       options.push({ key, label: format(cursor, 'MMMM yyyy') });
     }
 
     return options;
-  }, [currentMonthDate, currentMonthKey, lessons]);
+  }, [currentMonthDate]);
 
   const isCurrentMonthSelected = selectedMonthKey === currentMonthKey;
 
