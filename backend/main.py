@@ -213,7 +213,15 @@ def schedule_realtime(channel: str, event: str, data: dict):
         loop = asyncio.get_running_loop()
         loop.create_task(realtime_manager.broadcast(channel, payload))
     except RuntimeError:
-        pass
+        asyncio.run(realtime_manager.broadcast(channel, payload))
+
+
+def push_notification_realtime(user_id: int, payload: dict):
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(notification_manager.broadcast_to_user(user_id, payload))
+    except RuntimeError:
+        asyncio.run(notification_manager.broadcast_to_user(user_id, payload))
 
 
 def emit_role_events(role: str, event: str, data: dict, user_id: Optional[int] = None):
@@ -1089,8 +1097,8 @@ def create_lesson(lesson: schemas.LessonCreate, db: Session = Depends(get_db)):
     if not topic:
         raise HTTPException(status_code=400, detail="Lesson topic is required")
 
-    course_exists = db.query(models.Course.id).filter(models.Course.id == lesson.course_id).first()
-    if not course_exists:
+    course = db.query(models.Course).filter(models.Course.id == lesson.course_id).first()
+    if not course:
         raise HTTPException(status_code=404, detail="Course not found")
 
     scheduled_at = lesson.lesson_datetime
@@ -1109,6 +1117,17 @@ def create_lesson(lesson: schemas.LessonCreate, db: Session = Depends(get_db)):
     db.add(db_lesson)
     db.commit()
     db.refresh(db_lesson)
+
+    lesson_event_payload = {
+        "lesson_id": db_lesson.id,
+        "course_id": db_lesson.course_id,
+        "course_name": course.name,
+        "topic": db_lesson.topic,
+        "created_at": db_lesson.created_at.isoformat() if db_lesson.created_at else None,
+    }
+    emit_role_events("admin", "lesson.created", lesson_event_payload)
+    emit_role_events("teacher", "lesson.created", lesson_event_payload, user_id=course.teacher_id)
+
     return db_lesson
 
 @app.post("/lessons/{lesson_id}/attendance/save", response_model=List[schemas.Attendance])
@@ -1138,8 +1157,11 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
             detail=f"Attendance barcha o'quvchilar uchun olinishi kerak (missing={missing}, extra={extra})",
         )
 
+    course = db.query(models.Course).filter(models.Course.id == db_lesson.course_id).first()
+    course_name = course.name if course else f"Kurs #{db_lesson.course_id}"
     lesson_date = db_lesson.created_at.strftime("%Y-%m-%d") if db_lesson.created_at else datetime.utcnow().strftime("%Y-%m-%d")
     saved_records = []
+    penalty_by_student: Dict[int, int] = {}
 
     for item in payload.records:
         if item.penalty_hours not in ALLOWED_ATTENDANCE_HOURS:
@@ -1148,6 +1170,8 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
         grade_value = item.score if item.score is not None else item.grade
         if grade_value is not None and (grade_value < 0 or grade_value > 100):
             raise HTTPException(status_code=400, detail="Baho 0 dan 100 gacha bo'lishi kerak")
+
+        penalty_by_student[item.student_id] = item.penalty_hours
 
         existing = db.query(models.Attendance).filter(
             models.Attendance.lesson_id == lesson_id,
@@ -1184,7 +1208,60 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
     else:
         db_lesson.attendance_saved = True
 
+    student_rows = db.query(models.Student).filter(models.Student.id.in_(list(enrolled_student_ids))).all() if enrolled_student_ids else []
+    student_by_id = {student.id: student for student in student_rows}
+    notification_title = "📘 Davomat yangilandi" if is_edit_mode else "📘 Davomat olindi"
+    notification_type = "attendance_updated" if is_edit_mode else "attendance_saved"
+
+    created_notifications: List[models.Notification] = []
+    if enrolled_student_ids:
+        sync_notification_id_sequence(db)
+        for student_id in enrolled_student_ids:
+            penalty_value = penalty_by_student.get(student_id)
+            penalty_text = f" ({penalty_value} soat)" if penalty_value is not None else ""
+            message = f"{course_name} kursidagi \"{db_lesson.topic}\" lesson davomat holati yangilandi{penalty_text}."
+            db_notification = models.Notification(
+                user_id=student_id,
+                title=notification_title,
+                message=message,
+                type=notification_type,
+            )
+            db.add(db_notification)
+            created_notifications.append(db_notification)
+
     db.commit()
+
+    attendance_event_payload = {
+        "lesson_id": db_lesson.id,
+        "course_id": db_lesson.course_id,
+        "course_name": course_name,
+        "topic": db_lesson.topic,
+        "edited": is_edit_mode,
+        "records": len(saved_records),
+    }
+    event_name = "attendance.updated" if is_edit_mode else "attendance.saved"
+    emit_role_events("admin", event_name, attendance_event_payload)
+    emit_role_events("teacher", event_name, attendance_event_payload, user_id=course.teacher_id if course else None)
+
+    for db_notification in created_notifications:
+        db.refresh(db_notification)
+        awaitable_payload = notification_to_payload(db_notification)
+        push_notification_realtime(db_notification.user_id, awaitable_payload)
+
+        emit_role_events(
+            "student",
+            event_name,
+            {
+                **attendance_event_payload,
+                "student_id": db_notification.user_id,
+                "notification_id": db_notification.id,
+            },
+            user_id=db_notification.user_id,
+        )
+
+        student = student_by_id.get(db_notification.user_id)
+        if student and not notification_manager.is_online(db_notification.user_id):
+            send_sms_via_webhook(student.phone, f"{student.name}, {db_notification.message}")
 
     refreshed = db.query(models.Attendance).filter(models.Attendance.lesson_id == lesson_id).all()
     return refreshed

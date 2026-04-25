@@ -222,6 +222,34 @@ export default function TeacherAttendance() {
     }
   };
 
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ event?: string; data?: Record<string, unknown> }>;
+      const eventName = customEvent.detail?.event || '';
+      const eventData = customEvent.detail?.data || {};
+
+      if (!selectedCourse?.id) {
+        return;
+      }
+
+      const eventCourseId = Number(eventData.course_id);
+      if (!Number.isFinite(eventCourseId) || eventCourseId !== Number(selectedCourse.id)) {
+        return;
+      }
+
+      if (eventName === 'lesson.created' || eventName.startsWith('attendance.')) {
+        void loadLessons(selectedCourse.id as number, selectedLesson?.id as number | undefined);
+      }
+
+      if (eventName === 'enrollment.created') {
+        void loadEnrollments(selectedCourse.id as number);
+      }
+    };
+
+    window.addEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+    return () => window.removeEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+  }, [selectedCourse?.id, selectedLesson?.id]);
+
   const handleCourseChange = async (course: Course, preloadedStudents?: Student[]) => {
     setSelectedCourse(course);
     setLessonTopic('');

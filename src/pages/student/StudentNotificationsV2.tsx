@@ -116,6 +116,23 @@ export default function StudentNotificationsV2() {
     };
   }, [studentId]);
 
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ event?: string }>;
+      const eventName = customEvent.detail?.event || '';
+      if (
+        eventName.startsWith('attendance.') ||
+        eventName.startsWith('assignment.') ||
+        eventName.startsWith('payment.') ||
+        eventName === 'notification.created'
+      ) {
+        void loadData();
+      }
+    };
+    window.addEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+    return () => window.removeEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+  }, [studentId]);
+
   const paymentNotifications = useMemo(
     () => notifications.filter((n) => paymentTypes.has(n.type)),
     [notifications]

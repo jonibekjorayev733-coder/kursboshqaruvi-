@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend } from 'chart.js';
@@ -12,7 +12,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Le
 
 export default function AdminDashboard() {
   const { t } = useLanguage();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['admin-dashboard-data'],
     queryFn: async () => {
       const [students, teachers, courses, payments] = await Promise.all([
@@ -26,6 +26,28 @@ export default function AdminDashboard() {
     },
     staleTime: 60_000,
   });
+
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ event?: string }>;
+      const eventName = customEvent.detail?.event || '';
+
+      if (
+        eventName.startsWith('course.')
+        || eventName.startsWith('teacher.')
+        || eventName.startsWith('student.')
+        || eventName.startsWith('enrollment.')
+        || eventName.startsWith('payment.')
+        || eventName.startsWith('attendance.')
+        || eventName.startsWith('lesson.')
+      ) {
+        void refetch();
+      }
+    };
+
+    window.addEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+    return () => window.removeEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+  }, [refetch]);
 
   const counts = {
     students: data?.students.length ?? 0,

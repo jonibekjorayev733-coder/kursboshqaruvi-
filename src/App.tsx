@@ -49,6 +49,14 @@ const prettyRealtimeText = (event: RealtimeEvent) => {
       return "To'lov holati yangilandi";
     case 'notification.created':
       return 'Yangi bildirishnoma keldi';
+    case 'lesson.created':
+      return 'Yangi lesson qo‘shildi';
+    case 'attendance.saved':
+      return 'Davomat saqlandi';
+    case 'attendance.updated':
+      return 'Davomat yangilandi';
+    case 'attendance.deleted':
+      return 'Davomat yozuvi o‘chirildi';
     case 'course.created':
     case 'course.updated':
     case 'course.deleted':

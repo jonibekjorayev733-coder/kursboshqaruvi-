@@ -27,7 +27,7 @@ export default function TeacherDashboard() {
 
   const currentTeacherId = parseInt(localStorage.getItem('user_id') || '0', 10);
 
-  const { data: teacherDashboardData, isLoading: teacherDataLoading } = useQuery({
+  const { data: teacherDashboardData, isLoading: teacherDataLoading, refetch } = useQuery({
     queryKey: ['teacher-dashboard-data', currentTeacherId],
     enabled: currentTeacherId > 0,
     queryFn: async () => {
@@ -42,6 +42,27 @@ export default function TeacherDashboard() {
     },
     staleTime: 45_000,
   });
+
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ event?: string }>;
+      const eventName = customEvent.detail?.event || '';
+
+      if (
+        eventName.startsWith('course.')
+        || eventName.startsWith('student.')
+        || eventName.startsWith('enrollment.')
+        || eventName.startsWith('attendance.')
+        || eventName.startsWith('lesson.')
+        || eventName.startsWith('performance.')
+      ) {
+        void refetch();
+      }
+    };
+
+    window.addEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+    return () => window.removeEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+  }, [refetch]);
 
   useEffect(() => {
     if (!teacherDashboardData) return;

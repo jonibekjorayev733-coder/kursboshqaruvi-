@@ -96,7 +96,14 @@ export default function StudentDashboard() {
     const handleRealtime = (event: Event) => {
       const customEvent = event as CustomEvent<{ event?: string }>;
       const eventName = customEvent.detail?.event || '';
-      if (eventName === 'enrollment.created' || eventName.startsWith('assignment.') || eventName.startsWith('payment.') || eventName === 'notification.created') {
+      if (
+        eventName === 'enrollment.created'
+        || eventName.startsWith('assignment.')
+        || eventName.startsWith('payment.')
+        || eventName.startsWith('attendance.')
+        || eventName.startsWith('lesson.')
+        || eventName === 'notification.created'
+      ) {
         fetchDashboardData();
       }
     };

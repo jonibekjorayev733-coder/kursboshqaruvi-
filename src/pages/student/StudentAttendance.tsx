@@ -26,7 +26,7 @@ export default function StudentAttendance() {
   const currentStudentIdRaw = localStorage.getItem('user_id');
   const currentStudentId = currentStudentIdRaw ? parseInt(currentStudentIdRaw, 10) : NaN;
 
-  useEffect(() => {
+  const loadAttendanceData = async () => {
     if (Number.isNaN(currentStudentId)) {
       setAttends([]);
       setCourses([]);
@@ -35,13 +35,32 @@ export default function StudentAttendance() {
       return;
     }
 
-    Promise.all([api.getAttendance({ studentId: currentStudentId }), api.getCourses(), api.getLessons()])
-      .then(([att, crs, lessonData]) => {
-        setAttends(att);
-        setCourses(crs);
-        setLessons(lessonData);
-      })
-      .finally(() => setLoading(false));
+    const [att, crs, lessonData] = await Promise.all([
+      api.getAttendance({ studentId: currentStudentId }),
+      api.getCourses(),
+      api.getLessons(),
+    ]);
+    setAttends(att);
+    setCourses(crs);
+    setLessons(lessonData);
+  };
+
+  useEffect(() => {
+    loadAttendanceData().finally(() => setLoading(false));
+  }, [currentStudentId]);
+
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ event?: string }>;
+      const eventName = customEvent.detail?.event || '';
+
+      if (eventName.startsWith('attendance.') || eventName === 'lesson.created' || eventName === 'notification.created') {
+        loadAttendanceData().catch(() => undefined);
+      }
+    };
+
+    window.addEventListener('edugrow-realtime-event', handleRealtime as EventListener);
+    return () => window.removeEventListener('edugrow-realtime-event', handleRealtime as EventListener);
   }, [currentStudentId]);
 
   const courseMap = new Map(courses.map((course: any) => [course.id, course.name]));
