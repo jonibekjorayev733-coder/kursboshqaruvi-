@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { api, Course, Student } from '@/services/api';
 import { Users, Plus, Trash2, CheckCircle, Circle, Search, Loader2 } from 'lucide-react';
@@ -15,6 +15,7 @@ export default function TeacherStudents() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddingStudents, setIsAddingStudents] = useState(false);
   const [removingStudentId, setRemovingStudentId] = useState<number | null>(null);
+  const isBulkEnrollmentRef = useRef(false);
   const userId = localStorage.getItem('user_id');
   const teacherId = userId ? parseInt(userId, 10) : NaN;
 
@@ -45,6 +46,9 @@ export default function TeacherStudents() {
       const customEvent = event as CustomEvent<{ event?: string }>;
       const eventName = customEvent.detail?.event || '';
       if (!selectedCourse?.id) {
+        return;
+      }
+      if (isBulkEnrollmentRef.current) {
         return;
       }
       if (eventName === 'enrollment.created' || eventName.startsWith('student.') || eventName.startsWith('course.')) {
@@ -105,26 +109,48 @@ export default function TeacherStudents() {
 
     try {
       setIsAddingStudents(true);
+      isBulkEnrollmentRef.current = true;
       const courseId = selectedCourse.id as number;
 
       const selectedIds = Array.from(selectedStudents);
       let addedCount = 0;
       let alreadyEnrolledCount = 0;
       let failedCount = 0;
+      const addedStudentIds: number[] = [];
 
-      for (const studentId of selectedIds) {
-        try {
-          await api.createEnrollment(studentId, courseId);
-          addedCount += 1;
-        } catch (err) {
-          const message = err instanceof Error ? err.message.toLowerCase() : '';
-          if (message.includes('already enrolled')) {
-            alreadyEnrolledCount += 1;
-          } else {
-            failedCount += 1;
+      const results = await Promise.all(
+        selectedIds.map(async (studentId) => {
+          try {
+            await api.createEnrollment(studentId, courseId);
+            return { studentId, status: 'added' as const };
+          } catch (err) {
+            const message = err instanceof Error ? err.message.toLowerCase() : '';
+            if (message.includes('already enrolled')) {
+              return { studentId, status: 'already' as const };
+            }
             console.error('Error enrolling student', studentId, ':', err);
+            return { studentId, status: 'failed' as const };
           }
+        }),
+      );
+
+      results.forEach((item) => {
+        if (item.status === 'added') {
+          addedCount += 1;
+          addedStudentIds.push(item.studentId);
+        } else if (item.status === 'already') {
+          alreadyEnrolledCount += 1;
+        } else {
+          failedCount += 1;
         }
+      });
+
+      if (addedStudentIds.length > 0) {
+        setEnrolledStudentIds((prev) => {
+          const next = new Set(prev);
+          addedStudentIds.forEach((studentId) => next.add(studentId));
+          return next;
+        });
       }
 
       await loadEnrollments(courseId);
@@ -144,6 +170,7 @@ export default function TeacherStudents() {
       console.error('Error adding students:', e);
       toast.error('Xatolik yuz berdi');
     } finally {
+      isBulkEnrollmentRef.current = false;
       setIsAddingStudents(false);
     }
   };

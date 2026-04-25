@@ -66,11 +66,11 @@ const prettyRealtimeText = (event: RealtimeEvent) => {
   }
 };
 
-const showBankSmsToast = (title: string, body: string) => {
+const showRealtimeCourseToast = (title: string, body: string) => {
   toast.custom((toastId) => (
     <div className="w-[320px] rounded-2xl border border-emerald-300/40 bg-gradient-to-br from-emerald-50 via-emerald-100 to-cyan-100 p-4 shadow-2xl">
       <div className="mb-2 flex items-center justify-between">
-        <div className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-700">SMS BANK</div>
+        <div className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-700">KURS XABARI</div>
         <button onClick={() => toast.dismiss(toastId)} className="text-xs font-black text-emerald-700/70 hover:text-emerald-700">Yopish</button>
       </div>
       <p className="text-sm font-black text-emerald-900">{title}</p>
@@ -149,7 +149,7 @@ function App() {
           const previousAt = toastRateLimitRef.current.get(event.event) ?? 0;
           if (now - previousAt >= 2500) {
             toastRateLimitRef.current.set(event.event, now);
-            showBankSmsToast('Yangi xabar', prettyRealtimeText(event));
+            showRealtimeCourseToast('Yangi xabar', prettyRealtimeText(event));
           }
         },
         (connected) => {
