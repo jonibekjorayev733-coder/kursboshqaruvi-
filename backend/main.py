@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from typing import List, Optional, Dict, Set
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import calendar
 import os
@@ -1093,8 +1093,19 @@ def create_lesson(lesson: schemas.LessonCreate, db: Session = Depends(get_db)):
     if not course_exists:
         raise HTTPException(status_code=404, detail="Course not found")
 
+    scheduled_at = lesson.lesson_datetime
+    if scheduled_at is not None:
+        if scheduled_at.tzinfo is not None:
+            scheduled_at = scheduled_at.astimezone(timezone.utc).replace(tzinfo=None)
+        if scheduled_at < datetime.utcnow():
+            raise HTTPException(status_code=400, detail="Lesson vaqtini o'tgan sana/soatga qo'yib bo'lmaydi")
+
     sync_table_id_sequence(db, "lesson")
-    db_lesson = models.Lesson(course_id=lesson.course_id, topic=topic)
+    db_lesson = models.Lesson(
+        course_id=lesson.course_id,
+        topic=topic,
+        created_at=scheduled_at or datetime.utcnow(),
+    )
     db.add(db_lesson)
     db.commit()
     db.refresh(db_lesson)
@@ -1133,7 +1144,9 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
     for item in payload.records:
         if item.penalty_hours not in ALLOWED_ATTENDANCE_HOURS:
             raise HTTPException(status_code=400, detail="Attendance qiymati faqat 0, 2 yoki 4 bo'lishi mumkin")
-        if item.grade is not None and (item.grade < 0 or item.grade > 100):
+
+        grade_value = item.score if item.score is not None else item.grade
+        if grade_value is not None and (grade_value < 0 or grade_value > 100):
             raise HTTPException(status_code=400, detail="Baho 0 dan 100 gacha bo'lishi kerak")
 
         existing = db.query(models.Attendance).filter(
@@ -1148,7 +1161,7 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
             existing.status = status_value
             existing.penalty_hours = item.penalty_hours
             existing.late_minutes = None
-            existing.grade = item.grade
+            existing.grade = grade_value
             saved_records.append(existing)
             continue
 
@@ -1161,7 +1174,7 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
             status=status_value,
             penalty_hours=item.penalty_hours,
             late_minutes=None,
-            grade=item.grade,
+            grade=grade_value,
         )
         db.add(db_attendance)
         saved_records.append(db_attendance)

@@ -101,7 +101,7 @@ class LessonBase(BaseModel):
     topic: str
 
 class LessonCreate(LessonBase):
-    pass
+    lesson_datetime: Optional[datetime] = None
 
 class Lesson(LessonBase):
     id: int
@@ -113,6 +113,7 @@ class Lesson(LessonBase):
 class LessonAttendanceEntry(BaseModel):
     student_id: int
     penalty_hours: int
+    score: Optional[float] = None
     grade: Optional[float] = None
 
 class LessonAttendanceSaveRequest(BaseModel):

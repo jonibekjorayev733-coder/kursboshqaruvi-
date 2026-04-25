@@ -582,7 +582,7 @@ export const api = {
         return cachedGetJson<Lesson[]>(`${API_URL}/lessons/${suffix}`);
     },
 
-    async createLesson(payload: { course_id: number; topic: string }): Promise<Lesson> {
+    async createLesson(payload: { course_id: number; topic: string; lesson_datetime?: string }): Promise<Lesson> {
         const response = await fetch(`${API_URL}/lessons/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

@@ -34,6 +34,22 @@ function penaltyFromAttendanceRecord(record: any): PenaltyValue {
   return 4;
 }
 
+function monthKeyFromDate(value?: string) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function toLocalDatetimeInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 export default function TeacherAttendance() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -51,9 +67,63 @@ export default function TeacherAttendance() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [isEditingMode, setIsEditingMode] = useState(false);
   const [isLessonDrawerOpen, setIsLessonDrawerOpen] = useState(false);
+  const [now, setNow] = useState(new Date());
+  const [selectedMonthKey, setSelectedMonthKey] = useState(monthKeyFromDate(new Date().toISOString()));
+  const [lessonDateTime, setLessonDateTime] = useState(toLocalDatetimeInputValue(new Date()));
 
   const userId = localStorage.getItem('user_id');
   const teacherId = userId ? parseInt(userId, 10) : NaN;
+
+  const currentMonthDate = useMemo(() => new Date(now.getFullYear(), now.getMonth(), 1), [now]);
+  const previousMonthDate = useMemo(() => new Date(now.getFullYear(), now.getMonth() - 1, 1), [now]);
+  const currentMonthKey = useMemo(() => monthKeyFromDate(currentMonthDate.toISOString()), [currentMonthDate]);
+  const previousMonthKey = useMemo(() => monthKeyFromDate(previousMonthDate.toISOString()), [previousMonthDate]);
+  const monthOptions = useMemo(
+    () => [
+      { key: currentMonthKey, label: format(currentMonthDate, 'MMMM yyyy') },
+      { key: previousMonthKey, label: format(previousMonthDate, 'MMMM yyyy') },
+    ],
+    [currentMonthDate, currentMonthKey, previousMonthDate, previousMonthKey],
+  );
+
+  const visibleLessons = useMemo(
+    () => lessons.filter((lesson) => monthKeyFromDate(lesson.created_at) === selectedMonthKey),
+    [lessons, selectedMonthKey],
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setSelectedMonthKey(currentMonthKey);
+  }, [currentMonthKey]);
+
+  useEffect(() => {
+    if (!selectedLesson) {
+      if (visibleLessons.length === 0) {
+        setAttendanceMap({});
+        setGradeMap({});
+        setIsEditingMode(false);
+        return;
+      }
+      void selectLesson(visibleLessons[0]);
+      return;
+    }
+
+    const stillVisible = visibleLessons.some((lesson) => lesson.id === selectedLesson.id);
+    if (!stillVisible) {
+      if (visibleLessons.length === 0) {
+        setSelectedLesson(null);
+        setAttendanceMap({});
+        setGradeMap({});
+        setIsEditingMode(false);
+        return;
+      }
+      void selectLesson(visibleLessons[0]);
+    }
+  }, [selectedLesson, visibleLessons]);
 
   useEffect(() => {
     if (Number.isNaN(teacherId) || teacherId <= 0) {
@@ -86,21 +156,6 @@ export default function TeacherAttendance() {
               .filter((sid: number | null | undefined): sid is number => typeof sid === 'number')
           ));
           setLessons(lessonData);
-          if (lessonData.length > 0) {
-            const lesson = lessonData[0];
-            setSelectedLesson(lesson);
-            const lessonAttendance = await api.getAttendance({ lessonId: lesson.id });
-            if (cancelled) return;
-            const mapped: Record<number, PenaltyValue | null> = {};
-            const mappedGrades: Record<number, string> = {};
-            lessonAttendance.forEach((record: any) => {
-              mapped[record.student_id] = penaltyFromAttendanceRecord(record);
-              mappedGrades[record.student_id] = record?.grade === null || record?.grade === undefined ? '' : String(record.grade);
-            });
-            setAttendanceMap(mapped);
-            setGradeMap(mappedGrades);
-            setIsEditingMode(!lesson.attendance_saved);
-          }
         }
       })
       .catch(() => toast.error("Davomat sahifasi uchun ma'lumotlarni yuklab bo'lmadi"))
@@ -137,13 +192,15 @@ export default function TeacherAttendance() {
     const lessonData = await api.getLessons(courseId);
     setLessons(lessonData);
 
-    const nextLesson = preferredLessonId
-      ? lessonData.find((lesson) => lesson.id === preferredLessonId) ?? null
-      : lessonData[0] ?? null;
+    if (preferredLessonId) {
+      const nextLesson = lessonData.find((lesson) => lesson.id === preferredLessonId) ?? null;
+      if (nextLesson) {
+        await selectLesson(nextLesson);
+        return;
+      }
+    }
 
-    if (nextLesson) {
-      await selectLesson(nextLesson);
-    } else {
+    if (lessonData.length === 0) {
       setSelectedLesson(null);
       setAttendanceMap({});
       setGradeMap({});
@@ -157,6 +214,10 @@ export default function TeacherAttendance() {
     setSearchTerm('');
     setStatusFilter('all');
     setGradeMap({});
+    setSelectedLesson(null);
+    setAttendanceMap({});
+    setSelectedMonthKey(currentMonthKey);
+    setLessonDateTime(toLocalDatetimeInputValue(new Date()));
     if (preloadedStudents) {
       setStudents(preloadedStudents);
     }
@@ -212,10 +273,32 @@ export default function TeacherAttendance() {
       return;
     }
 
+    if (!lessonDateTime) {
+      toast.error('Lesson vaqtini kiriting');
+      return;
+    }
+
+    const scheduledAt = new Date(lessonDateTime);
+    if (Number.isNaN(scheduledAt.getTime())) {
+      toast.error('Lesson vaqti noto‘g‘ri');
+      return;
+    }
+
+    if (scheduledAt.getTime() < Date.now()) {
+      toast.error('O‘tgan vaqtga lesson qo‘shib bo‘lmaydi');
+      return;
+    }
+
     try {
       setCreatingLesson(true);
-      const createdLesson = await api.createLesson({ course_id: selectedCourse.id as number, topic });
+      const createdLesson = await api.createLesson({
+        course_id: selectedCourse.id as number,
+        topic,
+        lesson_datetime: scheduledAt.toISOString(),
+      });
       setLessonTopic('');
+      setLessonDateTime(toLocalDatetimeInputValue(new Date()));
+      setSelectedMonthKey(monthKeyFromDate(createdLesson.created_at) || currentMonthKey);
       setIsLessonDrawerOpen(false);
       await loadLessons(selectedCourse.id as number, createdLesson.id);
       toast.success('Lesson yaratildi. Endi davomat olishingiz mumkin.');
@@ -256,7 +339,7 @@ export default function TeacherAttendance() {
     }
 
     if (!hasMarkedAllStudents) {
-      toast.error("Saqlashdan oldin barcha o'quvchilarga davomat va baho kiriting");
+      toast.error("Saqlashdan oldin barcha o'quvchilarga davomat kiriting");
       return;
     }
 
@@ -297,7 +380,7 @@ export default function TeacherAttendance() {
             <p className="mb-2 text-xs font-black uppercase tracking-[0.22em] text-cyan-300 sm:text-sm">Lesson asosida davomat</p>
             <h1 className="text-3xl font-black tracking-tight text-white md:text-4xl">Universitet usulida davomat</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-300 md:text-base">
-              Sana tanlash yo‘q. Avval lesson yaratasiz, lessonni bosasiz va har bir o‘quvchi uchun <span className="font-black text-emerald-300">0</span>, <span className="font-black text-amber-300">2</span>, <span className="font-black text-rose-300">4</span> ni tanlaysiz.
+              Real-time vaqt bilan ishlaydi: lessonni hozirgi yoki kelajak vaqtga qo‘shasiz, o‘tgan vaqtga qo‘sha olmaysiz. Oylik filtr orqali shu oy va oldingi oy lessonlarini tanlab ko‘rishingiz mumkin.
             </p>
           </div>
           <GraduationCap className="hidden h-16 w-16 text-cyan-300/60 sm:block" />
@@ -334,18 +417,33 @@ export default function TeacherAttendance() {
       </div>
 
       <div className="space-y-4 rounded-3xl border border-slate-800 bg-slate-950/70 p-4 shadow-xl shadow-black/20 md:p-5">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xl font-black text-white">Lessonlar</p>
-            <p className="text-sm text-slate-400">Sana va vaqt avtomatik yoziladi. Davomat faqat lesson yaratilgandan keyin olinadi.</p>
+            <p className="text-sm text-slate-400">Tanlangan oy bo‘yicha lessonlarni ko‘rasiz va xohlaganini ochib davomatni tekshirasiz.</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-300">
               <CalendarDays className="h-4 w-4 text-cyan-400" />
-              {lessons.length} ta lesson
+              {visibleLessons.length} ta lesson
             </div>
+            <div className="rounded-2xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-cyan-200">
+              Hozir: {format(now, 'dd MMM yyyy • HH:mm:ss')}
+            </div>
+            <select
+              value={selectedMonthKey}
+              onChange={(event) => setSelectedMonthKey(event.target.value)}
+              className="rounded-2xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-white outline-none transition focus:border-cyan-500/60"
+            >
+              {monthOptions.map((option) => (
+                <option key={option.key} value={option.key}>{option.label}</option>
+              ))}
+            </select>
             <button
-              onClick={() => setIsLessonDrawerOpen(true)}
+              onClick={() => {
+                setLessonDateTime(toLocalDatetimeInputValue(new Date()));
+                setIsLessonDrawerOpen(true);
+              }}
               disabled={!selectedCourse}
               className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-cyan-700/30 transition hover:-translate-y-0.5 disabled:opacity-50"
             >
@@ -355,15 +453,15 @@ export default function TeacherAttendance() {
           </div>
         </div>
 
-        {lessons.length === 0 ? (
+        {visibleLessons.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 p-8 text-center">
             <BookOpen className="mx-auto mb-3 h-10 w-10 text-slate-500" />
-            <p className="text-lg font-black text-white">Hali lesson yaratilmagan</p>
-            <p className="mt-2 text-sm text-slate-400">Avval lesson mavzusini yozib, `Lesson add` tugmasini bosing. Shundan keyin davomat olinadi.</p>
+            <p className="text-lg font-black text-white">Tanlangan oyda lesson topilmadi</p>
+            <p className="mt-2 text-sm text-slate-400">Boshqa oyni tanlang yoki yangi lesson qo‘shing.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {lessons.map((lesson) => {
+            {visibleLessons.map((lesson) => {
               const isActive = selectedLesson?.id === lesson.id;
               return (
                 <button
@@ -605,7 +703,7 @@ export default function TeacherAttendance() {
               <div className="border-b border-slate-800 p-5">
                 <p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-300">Yangi lesson</p>
                 <h3 className="mt-2 text-2xl font-black text-white">Lesson qo‘shish</h3>
-                <p className="mt-2 text-sm text-slate-400">Mavzu nomini kiriting. Saqlangandan keyin darhol shu lesson ochiladi.</p>
+                <p className="mt-2 text-sm text-slate-400">Mavzu va vaqt kiriting. O‘tgan vaqtga lesson qo‘shib bo‘lmaydi, faqat ko‘rish mumkin.</p>
               </div>
 
               <div className="flex-1 space-y-4 p-5">
@@ -625,6 +723,18 @@ export default function TeacherAttendance() {
                     rows={5}
                     className="w-full resize-none rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-cyan-500/60"
                   />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Lesson vaqti</label>
+                  <input
+                    type="datetime-local"
+                    value={lessonDateTime}
+                    min={toLocalDatetimeInputValue(now)}
+                    onChange={(event) => setLessonDateTime(event.target.value)}
+                    className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base font-semibold text-white outline-none transition focus:border-cyan-500/60"
+                  />
+                  <p className="mt-2 text-xs text-slate-500">Faqat hozirgi yoki kelajak vaqtga lesson qo‘shiladi.</p>
                 </div>
               </div>
 
