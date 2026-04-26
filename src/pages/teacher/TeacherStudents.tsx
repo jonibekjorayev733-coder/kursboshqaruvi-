@@ -18,14 +18,17 @@ export default function TeacherStudents() {
   const isBulkEnrollmentRef = useRef(false);
   const userId = localStorage.getItem('user_id');
   const teacherId = userId ? parseInt(userId, 10) : NaN;
+  const userRole = localStorage.getItem('user_role') || '';
+  const isAdmin = userRole === 'admin';
 
   useEffect(() => {
-    if (Number.isNaN(teacherId) || teacherId <= 0) {
+    // Admin barcha kurslarni ko'rishi kerak, teacher esa faqat o'ziga biriktirilganlarni
+    if (!isAdmin && (Number.isNaN(teacherId) || teacherId <= 0)) {
       setLoading(false);
       return;
     }
 
-    Promise.all([api.getCourses(teacherId), api.getStudents()])
+    Promise.all([isAdmin ? api.getCourses() : api.getCourses(teacherId), api.getStudents()])
       .then(([c, s]) => {
         setCourses(c);
         setStudents(s);
