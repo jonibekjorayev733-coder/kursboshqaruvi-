@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Header, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func
+from sqlalchemy import text, func, and_, or_
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from typing import List, Optional, Dict, Set
 from datetime import datetime, timezone, timedelta
@@ -365,6 +365,286 @@ def send_telegram_to_student(student: Optional[models.Student], text_message: st
     return send_telegram_message(chat_id, text_message)
 
 
+TELEGRAM_BTN_ATTENDANCE = "Davomat"
+TELEGRAM_BTN_PAYMENTS = "To'lovlar"
+TELEGRAM_BTN_GRADES = "Baholar"
+TELEGRAM_BTN_COURSES = "Kurslarim"
+TELEGRAM_BTN_HOMEWORK = "Homework"
+
+
+def telegram_student_menu_keyboard() -> dict:
+    return {
+        "keyboard": [
+            [{"text": TELEGRAM_BTN_ATTENDANCE}, {"text": TELEGRAM_BTN_PAYMENTS}],
+            [{"text": TELEGRAM_BTN_GRADES}, {"text": TELEGRAM_BTN_COURSES}],
+            [{"text": TELEGRAM_BTN_HOMEWORK}],
+        ],
+        "resize_keyboard": True,
+    }
+
+
+def get_student_by_chat_id(db: Session, chat_id: str) -> Optional[models.Student]:
+    if not chat_id:
+        return None
+    return db.query(models.Student).filter(models.Student.telegram_chat_id == str(chat_id)).first()
+
+
+def build_attendance_summary(db: Session, student: models.Student) -> str:
+    rows = (
+        db.query(models.Attendance)
+        .filter(models.Attendance.student_id == student.id)
+        .order_by(models.Attendance.date.desc(), models.Attendance.id.desc())
+        .limit(5)
+        .all()
+    )
+    if not rows:
+        return "Davomat ma'lumotlari topilmadi."
+
+    course_ids = {row.course_id for row in rows if row.course_id is not None}
+    course_map = {
+        item.id: item.name
+        for item in db.query(models.Course).filter(models.Course.id.in_(list(course_ids))).all()
+    } if course_ids else {}
+
+    status_map = {"present": "Keldi", "late": "Kechikdi", "absent": "Kelmadi"}
+    lines = [f"Davomat (oxirgi {len(rows)} ta):"]
+    for row in rows:
+        course_name = course_map.get(row.course_id, f"Kurs #{row.course_id}")
+        status_text = status_map.get((row.status or "").lower(), row.status or "Noma'lum")
+        grade_text = f", Baho: {row.grade}" if row.grade is not None else ""
+        lines.append(f"- {row.date} | {course_name} | {status_text}{grade_text}")
+    return "\n".join(lines)
+
+
+def build_payment_summary(db: Session, student: models.Student) -> str:
+    rows = (
+        db.query(models.Payment)
+        .filter(models.Payment.student_id == student.id)
+        .order_by(models.Payment.updated_at.desc(), models.Payment.id.desc())
+        .limit(5)
+        .all()
+    )
+    if not rows:
+        return "To'lov ma'lumotlari topilmadi."
+
+    course_ids = {row.course_id for row in rows if row.course_id is not None}
+    course_map = {
+        item.id: item.name
+        for item in db.query(models.Course).filter(models.Course.id.in_(list(course_ids))).all()
+    } if course_ids else {}
+
+    lines = [f"To'lovlar (oxirgi {len(rows)} ta):"]
+    for row in rows:
+        course_name = course_map.get(row.course_id, f"Kurs #{row.course_id}")
+        status_text = "To'langan" if (row.status or "").lower() == "paid" else "Kutilmoqda"
+        lines.append(f"- {course_name} | {row.amount} {row.currency or 'USD'} | {status_text} | Oy: {row.month}")
+    return "\n".join(lines)
+
+
+def build_grade_summary(db: Session, student: models.Student) -> str:
+    rows = (
+        db.query(models.Performance)
+        .filter(models.Performance.student_id == student.id)
+        .order_by(models.Performance.date.desc(), models.Performance.id.desc())
+        .limit(5)
+        .all()
+    )
+    if not rows:
+        return "Baholar ma'lumotlari topilmadi."
+
+    course_ids = {row.course_id for row in rows if row.course_id is not None}
+    course_map = {
+        item.id: item.name
+        for item in db.query(models.Course).filter(models.Course.id.in_(list(course_ids))).all()
+    } if course_ids else {}
+
+    lines = [f"Baholar (oxirgi {len(rows)} ta):"]
+    for row in rows:
+        course_name = course_map.get(row.course_id, f"Kurs #{row.course_id}")
+        lines.append(f"- {row.date} | {course_name} | {row.label}: {row.score}")
+    return "\n".join(lines)
+
+
+def build_courses_summary(db: Session, student: models.Student) -> str:
+    enrollments = db.query(models.CourseEnrollment).filter(models.CourseEnrollment.student_id == student.id).all()
+    if not enrollments:
+        return "Siz hali birorta kursga biriktirilmagansiz."
+
+    course_ids = [item.course_id for item in enrollments if item.course_id is not None]
+    courses = db.query(models.Course).filter(models.Course.id.in_(course_ids)).all() if course_ids else []
+    if not courses:
+        return "Kurslar ma'lumotlari topilmadi."
+
+    lines = [f"Kurslarim ({len(courses)} ta):"]
+    for course in courses:
+        lines.append(f"- {course.name} | Narx: {course.price} | Daraja: {course.level}")
+    return "\n".join(lines)
+
+
+def build_homework_summary(db: Session, student: models.Student) -> str:
+    enrollments = db.query(models.CourseEnrollment).filter(models.CourseEnrollment.student_id == student.id).all()
+    course_ids = [item.course_id for item in enrollments if item.course_id is not None]
+
+    assignment_query = db.query(models.Assignment).filter(
+        or_(
+            models.Assignment.student_id == student.id,
+            and_(models.Assignment.student_id.is_(None), models.Assignment.course_id.in_(course_ids) if course_ids else False),
+        )
+    )
+    assignments = assignment_query.order_by(models.Assignment.created_at.desc(), models.Assignment.id.desc()).limit(7).all()
+
+    if not assignments:
+        return "Homework topilmadi."
+
+    assignment_ids = [item.id for item in assignments]
+    progress_rows = db.query(models.AssignmentProgress).filter(
+        models.AssignmentProgress.assignment_id.in_(assignment_ids),
+        models.AssignmentProgress.student_id == student.id,
+    ).all()
+    progress_map = {item.assignment_id: item.status for item in progress_rows}
+
+    course_ids = {item.course_id for item in assignments if item.course_id is not None}
+    course_map = {
+        item.id: item.name
+        for item in db.query(models.Course).filter(models.Course.id.in_(list(course_ids))).all()
+    } if course_ids else {}
+
+    lines = [f"Homework (oxirgi {len(assignments)} ta):"]
+    for assignment in assignments:
+        course_name = course_map.get(assignment.course_id, f"Kurs #{assignment.course_id}")
+        status_text = progress_map.get(assignment.id, "new")
+        lines.append(f"- {course_name} | {assignment.title} | Holat: {status_text}")
+    return "\n".join(lines)
+
+
+TELEGRAM_MENU_BUTTONS = ["Davomat", "To'lovlar", "Baholar", "Kurslarim", "Homework"]
+
+
+def telegram_main_menu_markup() -> dict:
+    return {
+        "keyboard": [
+            [{"text": "Davomat"}, {"text": "To'lovlar"}],
+            [{"text": "Baholar"}, {"text": "Kurslarim"}],
+            [{"text": "Homework"}],
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False,
+    }
+
+
+def find_student_by_chat_id(db: Session, chat_id: str) -> Optional[models.Student]:
+    if not chat_id:
+        return None
+    return db.query(models.Student).filter(models.Student.telegram_chat_id == str(chat_id)).first()
+
+
+def build_telegram_attendance_summary(db: Session, student: models.Student) -> str:
+    rows = db.query(models.Attendance).filter(
+        models.Attendance.student_id == student.id
+    ).order_by(models.Attendance.id.desc()).limit(5).all()
+
+    if not rows:
+        return "Davomat ma'lumoti hozircha topilmadi."
+
+    lines = ["So'nggi davomatlar:"]
+    for row in rows:
+        course = db.query(models.Course).filter(models.Course.id == row.course_id).first()
+        course_name = course.name if course else f"Kurs #{row.course_id}"
+        grade_text = f", baho: {row.grade}" if row.grade is not None else ""
+        lines.append(f"- {row.date} | {course_name} | {row.status}{grade_text}")
+    return "\n".join(lines)
+
+
+def build_telegram_payments_summary(db: Session, student: models.Student) -> str:
+    rows = db.query(models.Payment).filter(
+        models.Payment.student_id == student.id
+    ).order_by(models.Payment.id.desc()).limit(5).all()
+
+    if not rows:
+        return "To'lov ma'lumoti hozircha topilmadi."
+
+    lines = ["So'nggi to'lovlar:"]
+    for row in rows:
+        course = db.query(models.Course).filter(models.Course.id == row.course_id).first()
+        course_name = course.name if course else f"Kurs #{row.course_id}"
+        lines.append(f"- {course_name} | {row.month} | {row.amount} {row.currency or 'USD'} | {row.status}")
+    return "\n".join(lines)
+
+
+def build_telegram_grades_summary(db: Session, student: models.Student) -> str:
+    rows = db.query(models.Performance).filter(
+        models.Performance.student_id == student.id
+    ).order_by(models.Performance.id.desc()).limit(5).all()
+
+    if not rows:
+        return "Baho/o'zlashtirish ma'lumoti hozircha topilmadi."
+
+    lines = ["So'nggi baholar:"]
+    for row in rows:
+        course = db.query(models.Course).filter(models.Course.id == row.course_id).first()
+        course_name = course.name if course else f"Kurs #{row.course_id}"
+        lines.append(f"- {row.date} | {course_name} | {row.label}: {row.score}")
+    return "\n".join(lines)
+
+
+def build_telegram_courses_summary(db: Session, student: models.Student) -> str:
+    enrollments = db.query(models.CourseEnrollment).filter(
+        models.CourseEnrollment.student_id == student.id
+    ).all()
+
+    if not enrollments:
+        return "Siz hali kursga yozilmagansiz."
+
+    lines = ["Kurslaringiz:"]
+    for enrollment in enrollments:
+        course = db.query(models.Course).filter(models.Course.id == enrollment.course_id).first()
+        if course:
+            lines.append(f"- {course.name} ({course.level})")
+    return "\n".join(lines)
+
+
+def build_telegram_homework_summary(db: Session, student: models.Student) -> str:
+    enrollment_rows = db.query(models.CourseEnrollment.course_id).filter(
+        models.CourseEnrollment.student_id == student.id
+    ).all()
+    enrolled_course_ids = [row[0] for row in enrollment_rows if row[0] is not None]
+
+    query = db.query(models.Assignment).filter(
+        (models.Assignment.student_id == student.id) |
+        (
+            models.Assignment.student_id.is_(None) &
+            models.Assignment.course_id.in_(enrolled_course_ids if enrolled_course_ids else [-1])
+        )
+    )
+    rows = query.order_by(models.Assignment.id.desc()).limit(5).all()
+
+    if not rows:
+        return "Homework hozircha topilmadi."
+
+    lines = ["So'nggi homeworklar:"]
+    for row in rows:
+        course = db.query(models.Course).filter(models.Course.id == row.course_id).first()
+        course_name = course.name if course else f"Kurs #{row.course_id}"
+        submitted_text = "topshirilgan" if row.submitted else "topshirilmagan"
+        lines.append(f"- {course_name} | {row.title} | {submitted_text}")
+    return "\n".join(lines)
+
+
+def build_telegram_menu_response(db: Session, student: models.Student, menu_text: str) -> str:
+    normalized = (menu_text or "").strip().lower()
+    if normalized == "davomat":
+        return build_telegram_attendance_summary(db, student)
+    if normalized == "to'lovlar":
+        return build_telegram_payments_summary(db, student)
+    if normalized == "baholar":
+        return build_telegram_grades_summary(db, student)
+    if normalized == "kurslarim":
+        return build_telegram_courses_summary(db, student)
+    if normalized == "homework":
+        return build_telegram_homework_summary(db, student)
+    return ""
+
+
 def push_payment_telegram_message(db: Session, payment: models.Payment, student: Optional[models.Student] = None):
     if student is None:
         student = db.query(models.Student).filter(models.Student.id == payment.student_id).first()
@@ -484,11 +764,10 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
         ).order_by(models.TelegramLinkToken.created_at.desc()).first()
 
         if not pending_token or pending_token.expires_at < datetime.utcnow():
-            send_telegram_message(
+            return send_telegram_message(
                 chat_id,
-                "Bog'lash tokeni topilmadi yoki eskirgan. Iltimos, ilovadan yangi Telegram havola oling.",
-            )
-            return {"ok": True}
+                "Bog'lash tokeni topilmadi yoki eskirgan. Iltimos, ilovadan yangi Telegram havola oling."
+            ) or {"ok": True}
 
         contact_user_id = contact.get("user_id")
         from_user_id = from_user.get("id")
@@ -527,8 +806,24 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
         send_telegram_message(
             chat_id,
             f"Assalomu alaykum, {student.name}!\nBot muvaffaqiyatli ulandi. Endi davomat, baho, o'zlashtirish va to'lov xabarlari shu yerga keladi.",
+            reply_markup=telegram_main_menu_markup(),
         )
 
+        return {"ok": True}
+
+    if text_message and text_message in TELEGRAM_MENU_BUTTONS:
+        student = find_student_by_chat_id(db, chat_id)
+        if not student:
+            send_telegram_message(chat_id, "Avval botni ilovadagi Telegram havola orqali ulang.")
+            return {"ok": True}
+
+        response_text = build_telegram_menu_response(db, student, text_message)
+        if response_text:
+            send_telegram_message(chat_id, response_text, reply_markup=telegram_main_menu_markup())
+        return {"ok": True}
+
+    if text_message == "/menu":
+        send_telegram_message(chat_id, "Asosiy menyu:", reply_markup=telegram_main_menu_markup())
         return {"ok": True}
 
     if not text_message.startswith("/start"):
@@ -537,17 +832,36 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
     parts = text_message.split(maxsplit=1)
     start_token = parts[1].strip() if len(parts) > 1 else ""
 
-    if not start_token or not chat_id:
+    if not start_token:
+        student = find_student_by_chat_id(db, chat_id)
+        if student:
+            send_telegram_message(chat_id, "Asosiy menyu:", reply_markup=telegram_main_menu_markup())
+        else:
+            send_telegram_message(chat_id, "Avval ilovadan Telegram bog'lash havolasini oling.")
+        return {"ok": True}
+
+    if not chat_id:
         send_telegram_message(chat_id, "Bog'lash ma'lumoti topilmadi. Admin orqali qayta urinib ko'ring.")
         return {"ok": True}
 
     token_row = db.query(models.TelegramLinkToken).filter(
         models.TelegramLinkToken.token == start_token,
-        models.TelegramLinkToken.is_used.is_(False),
     ).first()
 
-    if not token_row or token_row.expires_at < datetime.utcnow():
-        send_telegram_message(chat_id, "Token eskirgan yoki noto'g'ri. Yangi QR so'rang.")
+    if not token_row:
+        send_telegram_message(chat_id, "Bog'lash havolasi noto'g'ri. Ilovadan qayta havola oling.")
+        return {"ok": True}
+
+    if token_row.is_used:
+        send_telegram_message(chat_id, "Bu havola allaqachon ishlatilgan. Yangi havola oling.")
+        return {"ok": True}
+
+    if token_row.expires_at < datetime.utcnow():
+        token_row.is_used = True
+        token_row.used_at = datetime.utcnow()
+        token_row.chat_id = chat_id
+        db.commit()
+        send_telegram_message(chat_id, "Token eskirgan. Iltimos, ilovadan yangi havola oling.")
         return {"ok": True}
 
     token_row.chat_id = chat_id
@@ -2534,6 +2848,7 @@ def create_assignment(assignment: schemas.AssignmentCreate, db: Session = Depend
     db.add(db_assignment)
     db.commit()
     db.refresh(db_assignment)
+    created_notifications: List[models.Notification] = []
     
     # Create notifications
     if db_assignment.student_id:
@@ -2546,6 +2861,7 @@ def create_assignment(assignment: schemas.AssignmentCreate, db: Session = Depend
             assignment_id=db_assignment.id
         )
         db.add(db_n)
+        created_notifications.append(db_n)
     else:
         # Notify all students in course
         enrollments = db.query(models.CourseEnrollment).filter(
@@ -2560,8 +2876,22 @@ def create_assignment(assignment: schemas.AssignmentCreate, db: Session = Depend
                 assignment_id=db_assignment.id
             )
             db.add(db_n)
+            created_notifications.append(db_n)
     
     db.commit()
+
+    for item in created_notifications:
+        db.refresh(item)
+        push_notification_realtime(item.user_id, notification_to_payload(item))
+        emit_role_events(
+            "student",
+            "notification.created",
+            {"notification_id": item.id, "user_id": item.user_id, "type": item.type},
+            user_id=item.user_id,
+        )
+        student = db.query(models.Student).filter(models.Student.id == item.user_id).first()
+        if student:
+            send_telegram_to_student(student, f"Homework: {item.message}")
 
     assignment_event = {
         "assignment_id": db_assignment.id,
@@ -2583,15 +2913,14 @@ def update_assignment(assignment_id: int, assignment: schemas.AssignmentCreate, 
     db_assignment = db.query(models.Assignment).filter(models.Assignment.id == assignment_id).first()
     if db_assignment is None: raise HTTPException(status_code=404)
     
-    # Store old student_id to notify both old and new students
-    old_student_id = db_assignment.student_id
-    
     for key, value in assignment.model_dump().items(): 
         setattr(db_assignment, key, value)
     
     db.commit()
     db.refresh(db_assignment)
     
+    created_notifications: List[models.Notification] = []
+
     # Notify students about the update
     if db_assignment.student_id:
         db_n = models.Notification(
@@ -2602,6 +2931,7 @@ def update_assignment(assignment_id: int, assignment: schemas.AssignmentCreate, 
             assignment_id=db_assignment.id
         )
         db.add(db_n)
+        created_notifications.append(db_n)
     else:
         # Notify all students in course
         enrollments = db.query(models.CourseEnrollment).filter(
@@ -2616,8 +2946,22 @@ def update_assignment(assignment_id: int, assignment: schemas.AssignmentCreate, 
                 assignment_id=db_assignment.id
             )
             db.add(db_n)
+            created_notifications.append(db_n)
     
     db.commit()
+
+    for item in created_notifications:
+        db.refresh(item)
+        push_notification_realtime(item.user_id, notification_to_payload(item))
+        emit_role_events(
+            "student",
+            "notification.created",
+            {"notification_id": item.id, "user_id": item.user_id, "type": item.type},
+            user_id=item.user_id,
+        )
+        student = db.query(models.Student).filter(models.Student.id == item.user_id).first()
+        if student:
+            send_telegram_to_student(student, f"Homework: {item.message}")
 
     update_event = {
         "assignment_id": db_assignment.id,
@@ -2832,6 +3176,7 @@ def get_teacher_task_notifications(teacher_id: int, db: Session = Depends(get_db
 def delete_assignment(assignment_id: int, db: Session = Depends(get_db)):
     db_assignment = db.query(models.Assignment).filter(models.Assignment.id == assignment_id).first()
     if db_assignment is None: raise HTTPException(status_code=404)
+    created_notifications: List[models.Notification] = []
     
     # Create notifications before deleting
     if db_assignment.student_id:
@@ -2843,6 +3188,7 @@ def delete_assignment(assignment_id: int, db: Session = Depends(get_db)):
             assignment_id=db_assignment.id
         )
         db.add(db_n)
+        created_notifications.append(db_n)
     else:
         # Notify all students in course
         enrollments = db.query(models.CourseEnrollment).filter(
@@ -2857,8 +3203,23 @@ def delete_assignment(assignment_id: int, db: Session = Depends(get_db)):
                 assignment_id=db_assignment.id
             )
             db.add(db_n)
+            created_notifications.append(db_n)
     
     db.delete(db_assignment)
     db.commit()
+
+    for item in created_notifications:
+        db.refresh(item)
+        push_notification_realtime(item.user_id, notification_to_payload(item))
+        emit_role_events(
+            "student",
+            "notification.created",
+            {"notification_id": item.id, "user_id": item.user_id, "type": item.type},
+            user_id=item.user_id,
+        )
+        student = db.query(models.Student).filter(models.Student.id == item.user_id).first()
+        if student:
+            send_telegram_to_student(student, f"Homework: {item.message}")
+
     return {"message": "Assignment deleted"}
 
