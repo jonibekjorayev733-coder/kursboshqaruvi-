@@ -326,13 +326,17 @@ def build_telegram_deep_link(start_token: str) -> str:
     return f"https://t.me/{bot_username}?start={urllib.parse.quote(start_token)}"
 
 
-def send_telegram_message(chat_id: Optional[str], text_message: str) -> bool:
+def send_telegram_message(chat_id: Optional[str], text_message: str, reply_markup: Optional[dict] = None) -> bool:
     token = get_telegram_bot_token()
     if not token or not chat_id:
         return False
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = json.dumps({"chat_id": str(chat_id), "text": text_message}).encode("utf-8")
+    payload_obj = {"chat_id": str(chat_id), "text": text_message}
+    if reply_markup is not None:
+        payload_obj["reply_markup"] = reply_markup
+
+    payload = json.dumps(payload_obj).encode("utf-8")
     request = urllib.request.Request(
         url,
         data=payload,
@@ -468,17 +472,73 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     message = payload.get("message") or {}
     text_message = (message.get("text") or "").strip()
+    contact = message.get("contact") or {}
+    from_user = message.get("from") or {}
     chat = message.get("chat") or {}
+    chat_id = str(chat.get("id") or "").strip()
+
+    if contact:
+        pending_token = db.query(models.TelegramLinkToken).filter(
+            models.TelegramLinkToken.chat_id == chat_id,
+            models.TelegramLinkToken.is_used.is_(False),
+        ).order_by(models.TelegramLinkToken.created_at.desc()).first()
+
+        if not pending_token or pending_token.expires_at < datetime.utcnow():
+            send_telegram_message(
+                chat_id,
+                "Bog'lash tokeni topilmadi yoki eskirgan. Iltimos, ilovadan yangi Telegram havola oling.",
+            )
+            return {"ok": True}
+
+        contact_user_id = contact.get("user_id")
+        from_user_id = from_user.get("id")
+        if contact_user_id is None or from_user_id is None or int(contact_user_id) != int(from_user_id):
+            send_telegram_message(
+                chat_id,
+                "Faqat o'zingizning telefon kontaktingizni yuborishingiz kerak.",
+            )
+            return {"ok": True}
+
+        contact_phone = normalize_phone(contact.get("phone_number"))
+        token_phone = normalize_phone(pending_token.phone)
+        if not contact_phone or not token_phone or contact_phone != token_phone:
+            send_telegram_message(
+                chat_id,
+                "Telefon raqam mos kelmadi. Faqat o'zingizga tegishli raqam bilan bog'lashingiz mumkin.",
+            )
+            return {"ok": True}
+
+        student = db.query(models.Student).filter(models.Student.id == pending_token.student_id).first()
+        if not student:
+            send_telegram_message(chat_id, "O'quvchi topilmadi.")
+            return {"ok": True}
+
+        student.telegram_chat_id = chat_id
+        username = from_user.get("username")
+        if username:
+            student.telegram = f"@{username}"
+        student.telegram_linked_at = datetime.utcnow()
+
+        pending_token.is_used = True
+        pending_token.used_at = datetime.utcnow()
+        pending_token.chat_id = chat_id
+        db.commit()
+
+        send_telegram_message(
+            chat_id,
+            f"Assalomu alaykum, {student.name}!\nBot muvaffaqiyatli ulandi. Endi davomat, baho, o'zlashtirish va to'lov xabarlari shu yerga keladi.",
+        )
+
+        return {"ok": True}
 
     if not text_message.startswith("/start"):
         return {"ok": True}
 
     parts = text_message.split(maxsplit=1)
     start_token = parts[1].strip() if len(parts) > 1 else ""
-    chat_id = str(chat.get("id") or "").strip()
 
     if not start_token or not chat_id:
-        send_telegram_message(chat_id, " Bog'lash ma'lumoti topilmadi. Admin orqali qayta urinib ko'ring.")
+        send_telegram_message(chat_id, "Bog'lash ma'lumoti topilmadi. Admin orqali qayta urinib ko'ring.")
         return {"ok": True}
 
     token_row = db.query(models.TelegramLinkToken).filter(
@@ -487,28 +547,20 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
     ).first()
 
     if not token_row or token_row.expires_at < datetime.utcnow():
-        send_telegram_message(chat_id, " Token eskirgan yoki noto'g'ri. Yangi QR so'rang.")
+        send_telegram_message(chat_id, "Token eskirgan yoki noto'g'ri. Yangi QR so'rang.")
         return {"ok": True}
 
-    student = db.query(models.Student).filter(models.Student.id == token_row.student_id).first()
-    if not student:
-        send_telegram_message(chat_id, " O'quvchi topilmadi.")
-        return {"ok": True}
-
-    student.telegram_chat_id = chat_id
-    username = message.get("from", {}).get("username")
-    if username:
-        student.telegram = f"@{username}"
-    student.telegram_linked_at = datetime.utcnow()
-
-    token_row.is_used = True
-    token_row.used_at = datetime.utcnow()
     token_row.chat_id = chat_id
     db.commit()
 
     send_telegram_message(
         chat_id,
-        f" Assalomu alaykum, {student.name}!\nBot muvaffaqiyatli ulandi. Endi davomat, baho, o'zlashtirish va to'lov xabarlari shu yerga keladi."
+        "Bog'lashni yakunlash uchun pastdagi tugma orqali o'zingizning telefon raqamingizni yuboring.",
+        reply_markup={
+            "keyboard": [[{"text": "Telefon raqamni yuborish", "request_contact": True}]],
+            "resize_keyboard": True,
+            "one_time_keyboard": True,
+        },
     )
 
     return {"ok": True}
