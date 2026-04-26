@@ -18,8 +18,9 @@ export default function TeacherStudents() {
   const isBulkEnrollmentRef = useRef(false);
   const userId = localStorage.getItem('user_id');
   const teacherId = userId ? parseInt(userId, 10) : NaN;
-  const userRole = localStorage.getItem('user_role') || '';
-  const isAdmin = userRole === 'admin';
+  const roleFromStorage = (localStorage.getItem('role') || localStorage.getItem('user_role') || '').toLowerCase();
+  const isAdminRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin/');
+  const isAdmin = roleFromStorage === 'admin' || isAdminRoute;
 
   useEffect(() => {
     // Admin barcha kurslarni ko'rishi kerak, teacher esa faqat o'ziga biriktirilganlarni
@@ -42,7 +43,7 @@ export default function TeacherStudents() {
         toast.error('Ma\'lumot yuklashda xatolik');
       })
       .finally(() => setLoading(false));
-  }, [teacherId]);
+  }, [teacherId, isAdmin]);
 
   useEffect(() => {
     const handleRealtime = (event: Event) => {
