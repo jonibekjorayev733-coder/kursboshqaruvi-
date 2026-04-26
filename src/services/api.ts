@@ -74,8 +74,17 @@ export const checkBackendConnection = async () => {
 
 const STUDENT_ENROLLMENTS_CACHE_TTL_MS = 20000;
 const studentEnrollmentsCache = new Map<number, { at: number; data: any[] }>();
-const API_GET_CACHE_TTL_MS = 12000;
+const API_GET_CACHE_TTL_MS = 3000;  // Reduced from 12s to 3s for faster course updates
 const apiGetCache = new Map<string, { at: number; data: unknown }>();
+
+// Helper to clear specific cache entries
+const clearApiCache = (urlPattern: string) => {
+    for (const key of apiGetCache.keys()) {
+        if (key.includes(urlPattern)) {
+            apiGetCache.delete(key);
+        }
+    }
+};
 const apiInFlight = new Map<string, Promise<unknown>>();
 
 const cachedGetJson = async <T>(url: string, ttlMs = API_GET_CACHE_TTL_MS): Promise<T> => {
@@ -366,6 +375,7 @@ export const api = {
             body: JSON.stringify(course),
         });
         if (!response.ok) throw new Error('Failed to create course');
+        clearApiCache('courses');
         return response.json();
     },
 
@@ -376,6 +386,7 @@ export const api = {
             body: JSON.stringify(course),
         });
         if (!response.ok) throw new Error('Failed to update course');
+        clearApiCache('courses');
         return response.json();
     },
 
@@ -398,6 +409,7 @@ export const api = {
             }
             throw new Error(errorMessage);
         }
+        clearApiCache('courses');
     },
 
     // Enrollments
