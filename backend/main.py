@@ -380,6 +380,16 @@ def format_uzs_amount(amount: Optional[float]) -> str:
     return f"{amount_text} so'm"
 
 
+def format_attendance_status(status: Optional[str]) -> str:
+    normalized = (status or "").strip().lower()
+    status_map = {
+        "present": "✅ Keldi",
+        "late": "🕒 Kechikdi",
+        "absent": "❌ Kelmadi",
+    }
+    return status_map.get(normalized, status or "Noma'lum")
+
+
 TELEGRAM_BTN_ATTENDANCE = "Davomat"
 TELEGRAM_BTN_PAYMENTS = "To'lovlar"
 TELEGRAM_BTN_GRADES = "Baholar"
@@ -561,12 +571,24 @@ def build_telegram_attendance_summary(db: Session, student: models.Student) -> s
     if not rows:
         return "Davomat ma'lumoti hozircha topilmadi."
 
-    lines = ["So'nggi davomatlar:"]
+    lines = ["📘 Davomat (oxirgi 5 ta):"]
     for row in rows:
         course = db.query(models.Course).filter(models.Course.id == row.course_id).first()
         course_name = course.name if course else f"Kurs #{row.course_id}"
-        grade_text = f", baho: {row.grade}" if row.grade is not None else ""
-        lines.append(f"- {row.date} | {course_name} | {row.status}{grade_text}")
+        lesson = db.query(models.Lesson).filter(models.Lesson.id == row.lesson_id).first() if row.lesson_id else None
+        topic_text = lesson.topic if lesson and lesson.topic else "Mavzu kiritilmagan"
+        status_text = format_attendance_status(row.status)
+        grade_text = f"\n🎯 Baho: {row.grade}" if row.grade is not None else ""
+        penalty_text = f"\n⏱ Jarima: {row.penalty_hours} soat" if row.penalty_hours is not None else ""
+        lines.append(
+            "\n".join([
+                "━━━━━━━━━━━━━━",
+                f"📚 Kurs: {course_name}",
+                f"📝 Mavzu: {topic_text}",
+                f"📅 Dars sanasi: {row.date}",
+                f"📌 Holat: {status_text}",
+            ]) + f"{grade_text}{penalty_text}"
+        )
     return "\n".join(lines)
 
 
@@ -599,14 +621,45 @@ def build_telegram_grades_summary(db: Session, student: models.Student) -> str:
         models.Performance.student_id == student.id
     ).order_by(models.Performance.id.desc()).limit(5).all()
 
-    if not rows:
-        return "Baho/o'zlashtirish ma'lumoti hozircha topilmadi."
+    if rows:
+        lines = ["🎯 Baholar (oxirgi 5 ta):"]
+        for row in rows:
+            course = db.query(models.Course).filter(models.Course.id == row.course_id).first()
+            course_name = course.name if course else f"Kurs #{row.course_id}"
+            lines.append(
+                "\n".join([
+                    "━━━━━━━━━━━━━━",
+                    f"📚 Kurs: {course_name}",
+                    f"📅 Sana: {row.date}",
+                    f"📌 Turi: {row.label}",
+                    f"✅ Natija: {row.score}",
+                ])
+            )
+        return "\n".join(lines)
 
-    lines = ["So'nggi baholar:"]
-    for row in rows:
+    attendance_rows = db.query(models.Attendance).filter(
+        models.Attendance.student_id == student.id,
+        models.Attendance.grade.isnot(None)
+    ).order_by(models.Attendance.id.desc()).limit(5).all()
+
+    if not attendance_rows:
+        return "Baho ma'lumoti hozircha topilmadi."
+
+    lines = ["🎯 Baholar (davomatdan olingan):"]
+    for row in attendance_rows:
         course = db.query(models.Course).filter(models.Course.id == row.course_id).first()
         course_name = course.name if course else f"Kurs #{row.course_id}"
-        lines.append(f"- {row.date} | {course_name} | {row.label}: {row.score}")
+        lesson = db.query(models.Lesson).filter(models.Lesson.id == row.lesson_id).first() if row.lesson_id else None
+        topic_text = lesson.topic if lesson and lesson.topic else "Mavzu kiritilmagan"
+        lines.append(
+            "\n".join([
+                "━━━━━━━━━━━━━━",
+                f"📚 Kurs: {course_name}",
+                f"📝 Mavzu: {topic_text}",
+                f"📅 Sana: {row.date}",
+                f"✅ Baho: {row.grade}",
+            ])
+        )
     return "\n".join(lines)
 
 
@@ -1948,12 +2001,22 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
 
         student = student_by_id.get(db_notification.user_id)
         if student:
+            penalty_value = penalty_by_student.get(db_notification.user_id)
+            grade_value = grade_by_student.get(db_notification.user_id)
+            status_value = status_by_student.get(db_notification.user_id)
+            status_text = format_attendance_status(status_value)
+            penalty_text = f"\n⏱ Jarima: {penalty_value} soat" if penalty_value is not None else ""
+            grade_text = f"\n🎯 Baho: {grade_value}" if grade_value is not None else ""
             telegram_message = (
-                f" Davomat/Baho yangilandi\n"
-                f" Kurs: {course_name}\n"
-                f" Mavzu: {db_lesson.topic}\n"
-                f" Sana: {lesson_date}\n"
-                f"? {db_notification.message}"
+                f"📘 Davomat yangilandi\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"📚 Kurs: {course_name}\n"
+                f"📝 Mavzu: {db_lesson.topic}\n"
+                f"📅 Dars sanasi: {lesson_date}\n"
+                f"📌 Holat: {status_text}"
+                f"{penalty_text}"
+                f"{grade_text}\n"
+                f"🕒 Yangilandi: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             )
             send_telegram_to_student(student, telegram_message)
 
