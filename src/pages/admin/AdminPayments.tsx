@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { DollarSign, AlertTriangle, CheckCircle2, Clock, Send, Download, TrendingUp, X, Mail, Phone, MessageCircle, CheckCheck, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, connectRealtimeChannel } from '../../services/api';
+import { formatUzs } from '../../lib/currency';
 
 interface Student {
   id: number;
@@ -46,7 +47,7 @@ export default function AdminPayments() {
   const buildReminderTemplate = (payment: Payment) => {
     const studentName = payment.student?.name || payment.student_name || 'O\'quvchi';
     const courseName = payment.course_name || `Kurs #${payment.course_id}`;
-    return `Assalomu alaykum, ${studentName}. ${courseName} kursi uchun ${payment.month} oy to'lovi ($${payment.amount}) kutilmoqda. Iltimos, imkon qadar tezroq to'lovni amalga oshiring.`;
+    return `Assalomu alaykum, ${studentName}. ${courseName} kursi uchun ${payment.month} oy to'lovi (${formatUzs(payment.amount)}) kutilmoqda. Iltimos, imkon qadar tezroq to'lovni amalga oshiring.`;
   };
 
   useEffect(() => {
@@ -300,9 +301,9 @@ export default function AdminPayments() {
       {/* KEY METRICS */}
       <motion.div variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { icon: TrendingUp, label: "Jami To'lovlar", value: `$${stats.totalRevenue}`, color: 'from-green-600 to-emerald-600' },
-          { icon: Clock, label: "Kutish Holatida", value: `$${stats.pendingAmount}`, color: 'from-yellow-600 to-amber-600' },
-          { icon: AlertTriangle, label: "Muvaffaqiyatsiz", value: `$${stats.failedAmount}`, color: 'from-red-600 to-rose-600' },
+          { icon: TrendingUp, label: "Jami To'lovlar", value: formatUzs(stats.totalRevenue), color: 'from-green-600 to-emerald-600' },
+          { icon: Clock, label: "Kutish Holatida", value: formatUzs(stats.pendingAmount), color: 'from-yellow-600 to-amber-600' },
+          { icon: AlertTriangle, label: "Muvaffaqiyatsiz", value: formatUzs(stats.failedAmount), color: 'from-red-600 to-rose-600' },
           { icon: CheckCircle2, label: "Tulanganlar", value: `${stats.paidCount}`, color: 'from-blue-600 to-cyan-600' }
         ].map((metric, idx) => (
           <motion.div
@@ -466,7 +467,7 @@ export default function AdminPayments() {
                         </td>
                         <td className="px-6 py-4 text-white font-black text-sm cursor-pointer" onClick={() => setSelectedPayment(payment)}>{payment.student_name || `#${payment.student_id}`}</td>
                         <td className="px-6 py-4 text-slate-300 font-black text-sm cursor-pointer" onClick={() => setSelectedPayment(payment)}>{payment.course_name || `Kurs #${payment.course_id}`}</td>
-                        <td className="px-6 py-4 text-white font-black text-sm cursor-pointer" onClick={() => setSelectedPayment(payment)}>${payment.amount}</td>
+                        <td className="px-6 py-4 text-white font-black text-sm cursor-pointer" onClick={() => setSelectedPayment(payment)}>{formatUzs(payment.amount)}</td>
                         <td className="px-6 py-4 text-slate-300 font-black text-sm cursor-pointer" onClick={() => setSelectedPayment(payment)}>{payment.month}</td>
                         <td className="px-6 py-4 text-slate-400 font-black text-xs cursor-pointer" onClick={() => setSelectedPayment(payment)}>
                           {payment.status === 'paid' && payment.paid_date
@@ -646,7 +647,7 @@ export default function AdminPayments() {
 
                   <div className="flex justify-between items-center pb-3 border-b border-slate-600/50">
                     <span className="text-slate-400 font-black text-sm">Summa</span>
-                    <span className="text-2xl font-black text-yellow-400">${selectedPayment.amount}</span>
+                    <span className="text-2xl font-black text-yellow-400">{formatUzs(selectedPayment.amount)}</span>
                   </div>
 
                   <div className="flex justify-between items-center">

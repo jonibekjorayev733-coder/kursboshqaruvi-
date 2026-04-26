@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, Course } from '@/services/api';
 import { useAppContext } from '@/contexts/AppContext';
 import { useLanguage } from '@/hooks/useTranslation';
+import { formatUzs } from '@/lib/currency';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
 
@@ -120,7 +121,7 @@ export default function AdminDashboard() {
               </div>
               <div className="text-right">
                 <p className="text-cyan-100/70 text-[10px] sm:text-xs font-semibold uppercase tracking-widest mb-1 sm:mb-2">Jami Daromad</p>
-                <p className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black text-white">${totalRevenue.toLocaleString()}</p>
+                <p className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black text-white">{formatUzs(totalRevenue)}</p>
               </div>
             </div>
           </motion.div>
@@ -170,7 +171,7 @@ export default function AdminDashboard() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">To'lov Qarz</p>
-                  <p className="text-2xl sm:text-3xl md:text-4xl font-black text-blue-300">${unpaidTotal.toLocaleString()}</p>
+                  <p className="text-2xl sm:text-3xl md:text-4xl font-black text-blue-300">{formatUzs(unpaidTotal)}</p>
                 </div>
                 <DollarSign className="w-6 h-6 sm:w-7 sm:h-7 text-blue-300 opacity-50" />
               </div>

@@ -365,6 +365,20 @@ def send_telegram_to_student(student: Optional[models.Student], text_message: st
     return send_telegram_message(chat_id, text_message)
 
 
+def format_uzs_amount(amount: Optional[float]) -> str:
+    try:
+        value = float(amount or 0)
+    except Exception:
+        value = 0.0
+
+    if value.is_integer():
+        amount_text = f"{int(value):,}".replace(",", " ")
+    else:
+        amount_text = f"{value:,.2f}".replace(",", " ").replace(".", ",")
+
+    return f"{amount_text} so'm"
+
+
 TELEGRAM_BTN_ATTENDANCE = "Davomat"
 TELEGRAM_BTN_PAYMENTS = "To'lovlar"
 TELEGRAM_BTN_GRADES = "Baholar"
@@ -437,7 +451,7 @@ def build_payment_summary(db: Session, student: models.Student) -> str:
     for row in rows:
         course_name = course_map.get(row.course_id, f"Kurs #{row.course_id}")
         status_text = "To'langan" if (row.status or "").lower() == "paid" else "Kutilmoqda"
-        lines.append(f"- {course_name} | {row.amount} {row.currency or 'USD'} | {status_text} | Oy: {row.month}")
+        lines.append(f"- {course_name} | {format_uzs_amount(row.amount)} | {status_text} | Oy: {row.month}")
     return "\n".join(lines)
 
 
@@ -563,11 +577,19 @@ def build_telegram_payments_summary(db: Session, student: models.Student) -> str
     if not rows:
         return "To'lov ma'lumoti hozircha topilmadi."
 
-    lines = ["So'nggi to'lovlar:"]
+    lines = ["To'lovlar bo'limi (oxirgi holatlar):"]
     for row in rows:
         course = db.query(models.Course).filter(models.Course.id == row.course_id).first()
         course_name = course.name if course else f"Kurs #{row.course_id}"
-        lines.append(f"- {course_name} | {row.month} | {row.amount} {row.currency or 'USD'} | {row.status}")
+        status_text = "✅ To'langan" if (row.status or "").lower() == "paid" else "⏳ Kutilmoqda"
+        lines.append(
+            "\n".join([
+                f"• Kurs: {course_name}",
+                f"  Oy: {row.month}",
+                f"  Summa: {format_uzs_amount(row.amount)}",
+                f"  Holat: {status_text}",
+            ])
+        )
     return "\n".join(lines)
 
 
@@ -653,13 +675,14 @@ def push_payment_telegram_message(db: Session, payment: models.Payment, student:
 
     course = db.query(models.Course).filter(models.Course.id == payment.course_id).first()
     course_name = course.name if course else f"Kurs #{payment.course_id}"
-    status_text = "To'landi" if payment.status == "paid" else "Kutilmoqda"
+    status_text = "✅ To'landi" if payment.status == "paid" else "⏳ Kutilmoqda"
     message = (
-        f" To'lov holati yangilandi\n"
-        f" Kurs: {course_name}\n"
-        f" Summasi: {payment.amount} {payment.currency or 'USD'}\n"
-        f" Holati: {status_text}\n"
-        f" Oy: {payment.month}"
+        f"💳 To'lov holati yangilandi\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"📚 Kurs: {course_name}\n"
+        f"📅 Oy: {payment.month}\n"
+        f"💰 Summa: {format_uzs_amount(payment.amount)}\n"
+        f"📌 Holat: {status_text}"
     )
     send_telegram_to_student(student, message)
 
@@ -1305,7 +1328,7 @@ async def create_enrollment(enrollment: schemas.CourseEnrollmentCreate, db: Sess
                 student_id=enrollment.student_id,
                 course_id=enrollment.course_id,
                 amount=course.price if course else 0,
-                currency="USD",
+                currency="UZS",
                 status="pending",
                 due_date=due_date,
                 month=current_month,
@@ -2090,7 +2113,7 @@ def ensure_current_month_payments(db: Session):
             student_id=enrollment.student_id,
             course_id=enrollment.course_id,
             amount=course.price if course else 0,
-            currency="USD",
+            currency="UZS",
             status="pending",
             due_date=default_due_date,
             month=current_month,
@@ -2224,7 +2247,7 @@ async def send_payment_sms(payment_id: int, db: Session = Depends(get_db)):
     db_notification = models.Notification(
         user_id=student.id,
         title="💳 To'lov qiling",
-        message=f"{course_name} kursi uchun to'lovni amalga oshiring. Miqdor: ${payment.amount}",
+        message=f"{course_name} kursi uchun to'lovni amalga oshiring. Miqdor: {format_uzs_amount(payment.amount)}",
         type="payment_reminder",
     )
     db.add(db_notification)
@@ -2256,10 +2279,11 @@ async def send_payment_sms(payment_id: int, db: Session = Depends(get_db)):
     send_telegram_to_student(
         student,
         (
-            f" To'lov eslatmasi\n"
-            f" Kurs: {course_name}\n"
-            f" Miqdor: {payment.amount} {payment.currency or 'USD'}\n"
-            f"? {db_notification.message}"
+            f"📣 To'lov eslatmasi\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"📚 Kurs: {course_name}\n"
+            f"💰 Miqdor: {format_uzs_amount(payment.amount)}\n"
+            f"📝 Xabar: {db_notification.message}"
         ),
     )
 
@@ -2304,7 +2328,7 @@ async def send_bulk_payment_notification(payload: dict, db: Session = Depends(ge
             if message_override:
                 message = message_override
             elif payment.status == "pending":
-                message = f"{course_name} kursi uchun to'lovni amalga oshiring. Miqdor: ${payment.amount}"
+                message = f"{course_name} kursi uchun to'lovni amalga oshiring. Miqdor: {format_uzs_amount(payment.amount)}"
             elif payment.status == "paid":
                 message = f"{course_name} kursi uchun to'lovni qabul qildik. Rahmat!"
             else:
@@ -2313,10 +2337,11 @@ async def send_bulk_payment_notification(payload: dict, db: Session = Depends(ge
             send_telegram_to_student(
                 student,
                 (
-                    f" To'lov xabari\n"
-                    f" Kurs: {course_name}\n"
-                    f" Miqdor: {payment.amount} {payment.currency or 'USD'}\n"
-                    f"? {message}"
+                    f"📬 To'lov xabari\n"
+                    f"━━━━━━━━━━━━━━\n"
+                    f"📚 Kurs: {course_name}\n"
+                    f"💰 Miqdor: {format_uzs_amount(payment.amount)}\n"
+                    f"📝 Xabar: {message}"
                 ),
             )
 
@@ -2454,7 +2479,7 @@ def confirm_stripe_payment(
     db.add(models.Notification(
         user_id=payment.student_id,
         title="✅ To'lov qabul qilindi",
-        message=f"{course_name} kursi uchun ${payment.amount} to'lov Stripe orqali qabul qilindi. Sana: {paid_time}",
+        message=f"{course_name} kursi uchun {format_uzs_amount(payment.amount)} to'lov Stripe orqali qabul qilindi. Sana: {paid_time}",
         type="payment_paid"
     ))
     # Notify all admins
@@ -2463,7 +2488,7 @@ def confirm_stripe_payment(
         db.add(models.Notification(
             user_id=adm.id,
             title="💳 Yangi to'lov keldi",
-            message=f"{student_name} → {course_name}: ${payment.amount} (Stripe) • {paid_time}",
+            message=f"{student_name} → {course_name}: {format_uzs_amount(payment.amount)} (Stripe) • {paid_time}",
             type="payment_received"
         ))
     db.commit()
@@ -2585,7 +2610,7 @@ async def verify_click_payment(
         db.add(models.Notification(
             user_id=payment.student_id,
             title="✅ To'lov qabul qilindi",
-            message=f"{course_name} kursi uchun ${payment.amount} to'lov Click orqali qabul qilindi. Sana: {paid_time}",
+            message=f"{course_name} kursi uchun {format_uzs_amount(payment.amount)} to'lov Click orqali qabul qilindi. Sana: {paid_time}",
             type="payment_paid"
         ))
         from models import Admin
@@ -2593,7 +2618,7 @@ async def verify_click_payment(
             db.add(models.Notification(
                 user_id=adm.id,
                 title="💳 Yangi to'lov keldi",
-                message=f"{student_name} → {course_name}: ${payment.amount} (Click) • {paid_time}",
+                message=f"{student_name} → {course_name}: {format_uzs_amount(payment.amount)} (Click) • {paid_time}",
                 type="payment_received"
             ))
         db.commit()

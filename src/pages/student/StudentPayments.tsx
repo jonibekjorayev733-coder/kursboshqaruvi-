@@ -4,6 +4,7 @@ import { DollarSign, AlertTriangle, CheckCircle2, Clock, CreditCard, CheckCheck,
 import { toast } from 'sonner';
 import { api, connectRealtimeChannel } from '../../services/api';
 import PaymentFormReal from '../../components/student/PaymentFormReal';
+import { formatUzs } from '../../lib/currency';
 
 interface Payment {
   id: number;
@@ -182,8 +183,8 @@ export default function StudentPayments() {
       {/* KEY METRICS */}
       <motion.div variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } }} className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {[
-          { icon: CheckCircle2, label: "To'langan To'lovlar", value: `$${stats.totalPaid.toFixed(2)}`, color: 'from-green-600 to-emerald-600' },
-          { icon: AlertTriangle, label: "To'lash Kerak", value: `$${stats.totalDue.toFixed(2)}`, color: 'from-amber-600 to-orange-600' },
+          { icon: CheckCircle2, label: "To'langan To'lovlar", value: formatUzs(stats.totalPaid), color: 'from-green-600 to-emerald-600' },
+          { icon: AlertTriangle, label: "To'lash Kerak", value: formatUzs(stats.totalDue), color: 'from-amber-600 to-orange-600' },
           { icon: Clock, label: "Kutish Holatida", value: `${stats.pendingCount} ta kurs`, color: 'from-blue-600 to-cyan-600' }
         ].map((metric, idx) => (
           <motion.div
@@ -280,14 +281,14 @@ export default function StudentPayments() {
                 {/* CENTER - AMOUNT (Hidden on mobile, shown on desktop) */}
                 <div className="hidden md:block text-center">
                   <p className="text-slate-400 text-xs md:text-sm font-black uppercase tracking-wide mb-1">To'lash Kerak</p>
-                  <p className="text-3xl md:text-4xl font-black text-white">${payment.amount}</p>
+                  <p className="text-3xl md:text-4xl font-black text-white">{formatUzs(payment.amount)}</p>
                 </div>
 
                 {/* MOBILE AMOUNT + ACTION */}
                 <div className="md:hidden w-full">
                   <div className="text-center mb-3">
                     <p className="text-slate-400 text-xs font-black uppercase tracking-wide mb-1">To'lash Kerak</p>
-                    <p className="text-3xl font-black text-white">${payment.amount}</p>
+                    <p className="text-3xl font-black text-white">{formatUzs(payment.amount)}</p>
                   </div>
                 </div>
 
