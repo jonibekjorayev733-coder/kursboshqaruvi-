@@ -4,12 +4,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from typing import List, Optional, Dict, Set
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import asyncio
 import calendar
 import os
 import json
 import urllib.request
+import urllib.parse
 import base64
 import hmac
 import hashlib
@@ -275,6 +276,82 @@ def send_sms_via_webhook(phone: Optional[str], message: str) -> bool:
         return False
 
 
+def normalize_phone(phone: Optional[str]) -> str:
+    if not phone:
+        return ""
+    return "".join(ch for ch in str(phone) if ch.isdigit())
+
+
+def get_telegram_bot_token() -> str:
+    return os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+
+
+def get_telegram_bot_username() -> str:
+    return os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
+
+
+def build_telegram_deep_link(start_token: str) -> str:
+    bot_username = get_telegram_bot_username()
+    if not bot_username:
+        return ""
+    return f"https://t.me/{bot_username}?start={urllib.parse.quote(start_token)}"
+
+
+def send_telegram_message(chat_id: Optional[str], text_message: str) -> bool:
+    token = get_telegram_bot_token()
+    if not token or not chat_id:
+        return False
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = json.dumps({"chat_id": str(chat_id), "text": text_message}).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return 200 <= response.status < 300
+    except Exception as exc:
+        print(f"[WARNING] Telegram send failed: {exc}")
+        return False
+
+
+def send_telegram_to_student(student: Optional[models.Student], text_message: str) -> bool:
+    if not student:
+        return False
+
+    chat_id = getattr(student, "telegram_chat_id", None) or None
+    if not chat_id and student.telegram:
+        tg_value = str(student.telegram).strip()
+        if tg_value.lstrip("-").isdigit():
+            chat_id = tg_value
+
+    return send_telegram_message(chat_id, text_message)
+
+
+def push_payment_telegram_message(db: Session, payment: models.Payment, student: Optional[models.Student] = None):
+    if student is None:
+        student = db.query(models.Student).filter(models.Student.id == payment.student_id).first()
+    if not student:
+        return
+
+    course = db.query(models.Course).filter(models.Course.id == payment.course_id).first()
+    course_name = course.name if course else f"Kurs #{payment.course_id}"
+    status_text = "To'landi" if payment.status == "paid" else "Kutilmoqda"
+    message = (
+        f" To'lov holati yangilandi\n"
+        f" Kurs: {course_name}\n"
+        f" Summasi: {payment.amount} {payment.currency or 'USD'}\n"
+        f" Holati: {status_text}\n"
+        f" Oy: {payment.month}"
+    )
+    send_telegram_to_student(student, message)
+
+
+
 def build_payme_checkout_url(payment_id: int, amount: float) -> str:
     merchant_id = os.getenv("PAYME_MERCHANT_ID", "").strip()
     checkout_base = os.getenv("PAYME_CHECKOUT_BASE", "https://checkout.paycom.uz")
@@ -303,6 +380,114 @@ def verify_payme_callback_signature(raw_body: bytes, signature: str) -> bool:
 
     expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+def find_student_by_phone(db: Session, phone: str) -> Optional[models.Student]:
+    normalized_target = normalize_phone(phone)
+    if not normalized_target:
+        return None
+
+    students = db.query(models.Student).filter(models.Student.phone.isnot(None)).all()
+    for student in students:
+        if normalize_phone(student.phone) == normalized_target:
+            return student
+
+    return None
+
+
+@app.post("/telegram/link/request", response_model=schemas.TelegramLinkResponse)
+def request_telegram_link(payload: schemas.TelegramLinkRequest, db: Session = Depends(get_db)):
+    student = find_student_by_phone(db, payload.phone)
+    if not student:
+        raise HTTPException(status_code=404, detail="Bu telefon raqamga bog'langan o'quvchi topilmadi")
+
+    bot_username = get_telegram_bot_username()
+    if not bot_username:
+        raise HTTPException(status_code=500, detail="TELEGRAM_BOT_USERNAME sozlanmagan")
+
+    expires_at = datetime.utcnow() + timedelta(minutes=15)
+    start_token = uuid.uuid4().hex
+
+    db.query(models.TelegramLinkToken).filter(
+        models.TelegramLinkToken.student_id == student.id,
+        models.TelegramLinkToken.is_used.is_(False),
+    ).update({"is_used": True, "used_at": datetime.utcnow()}, synchronize_session=False)
+
+    sync_table_id_sequence(db, "telegram_link_token")
+    db_token = models.TelegramLinkToken(
+        student_id=student.id,
+        phone=normalize_phone(payload.phone),
+        token=start_token,
+        is_used=False,
+        expires_at=expires_at,
+    )
+    db.add(db_token)
+    db.commit()
+
+    deep_link = build_telegram_deep_link(start_token)
+    if not deep_link:
+        raise HTTPException(status_code=500, detail="Telegram deep-link yaratib bo'lmadi")
+
+    return {
+        "student_id": student.id,
+        "student_name": student.name,
+        "phone": student.phone or payload.phone,
+        "deep_link": deep_link,
+        "qr_payload": deep_link,
+        "expires_at": expires_at,
+    }
+
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
+    payload = await request.json()
+    message = payload.get("message") or {}
+    text_message = (message.get("text") or "").strip()
+    chat = message.get("chat") or {}
+
+    if not text_message.startswith("/start"):
+        return {"ok": True}
+
+    parts = text_message.split(maxsplit=1)
+    start_token = parts[1].strip() if len(parts) > 1 else ""
+    chat_id = str(chat.get("id") or "").strip()
+
+    if not start_token or not chat_id:
+        send_telegram_message(chat_id, " Bog'lash ma'lumoti topilmadi. Admin orqali qayta urinib ko'ring.")
+        return {"ok": True}
+
+    token_row = db.query(models.TelegramLinkToken).filter(
+        models.TelegramLinkToken.token == start_token,
+        models.TelegramLinkToken.is_used.is_(False),
+    ).first()
+
+    if not token_row or token_row.expires_at < datetime.utcnow():
+        send_telegram_message(chat_id, " Token eskirgan yoki noto'g'ri. Yangi QR so'rang.")
+        return {"ok": True}
+
+    student = db.query(models.Student).filter(models.Student.id == token_row.student_id).first()
+    if not student:
+        send_telegram_message(chat_id, " O'quvchi topilmadi.")
+        return {"ok": True}
+
+    student.telegram_chat_id = chat_id
+    username = message.get("from", {}).get("username")
+    if username:
+        student.telegram = f"@{username}"
+    student.telegram_linked_at = datetime.utcnow()
+
+    token_row.is_used = True
+    token_row.used_at = datetime.utcnow()
+    token_row.chat_id = chat_id
+    db.commit()
+
+    send_telegram_message(
+        chat_id,
+        f" Assalomu alaykum, {student.name}!\nBot muvaffaqiyatli ulandi. Endi davomat, baho, o'zlashtirish va to'lov xabarlari shu yerga keladi."
+    )
+
+    return {"ok": True}
+
 
 
 @app.websocket("/ws/notifications/{user_id}")
@@ -363,6 +548,21 @@ def ensure_legacy_schema_compatibility():
         "ALTER TABLE IF EXISTS assignment_progress ADD COLUMN IF NOT EXISTS in_progress_at TIMESTAMP",
         "ALTER TABLE IF EXISTS assignment_progress ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP",
         "ALTER TABLE IF EXISTS assignment_progress ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
+        "ALTER TABLE IF EXISTS student ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR",
+        "ALTER TABLE IF EXISTS student ADD COLUMN IF NOT EXISTS telegram_linked_at TIMESTAMP",
+        """
+        CREATE TABLE IF NOT EXISTS telegram_link_token (
+            id SERIAL PRIMARY KEY,
+            student_id INTEGER NOT NULL REFERENCES student(id),
+            phone VARCHAR NOT NULL,
+            token VARCHAR NOT NULL UNIQUE,
+            is_used BOOLEAN DEFAULT FALSE,
+            expires_at TIMESTAMP NOT NULL,
+            used_at TIMESTAMP NULL,
+            chat_id VARCHAR NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+        """,
     ]
 
     try:
@@ -428,12 +628,12 @@ def sync_table_id_sequence(db: Session, table_name: str):
 
 
 def sync_critical_sequences_with_connection(conn):
-    for table_name in ("notification", "attendance", "assignment_progress", "course_enrollment", "course", "student", "payment", "lesson"):
+    for table_name in ("notification", "attendance", "assignment_progress", "course_enrollment", "course", "student", "payment", "lesson", "telegram_link_token"):
         sync_table_id_sequence_with_connection(conn, table_name)
 
 
 def sync_critical_sequences(db: Session):
-    for table_name in ("notification", "attendance", "assignment_progress", "course_enrollment", "course", "student", "payment", "lesson"):
+    for table_name in ("notification", "attendance", "assignment_progress", "course_enrollment", "course", "student", "payment", "lesson", "telegram_link_token"):
         sync_table_id_sequence(db, table_name)
 
 
@@ -1162,6 +1362,7 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
     lesson_date = db_lesson.created_at.strftime("%Y-%m-%d") if db_lesson.created_at else datetime.utcnow().strftime("%Y-%m-%d")
     saved_records = []
     penalty_by_student: Dict[int, int] = {}
+    grade_by_student: Dict[int, Optional[float]] = {}
 
     for item in payload.records:
         if item.penalty_hours not in ALLOWED_ATTENDANCE_HOURS:
@@ -1172,6 +1373,7 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
             raise HTTPException(status_code=400, detail="Baho 0 dan 100 gacha bo'lishi kerak")
 
         penalty_by_student[item.student_id] = item.penalty_hours
+        grade_by_student[item.student_id] = grade_value
 
         existing = db.query(models.Attendance).filter(
             models.Attendance.lesson_id == lesson_id,
@@ -1219,7 +1421,9 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
         for student_id in enrolled_student_ids:
             penalty_value = penalty_by_student.get(student_id)
             penalty_text = f" ({penalty_value} soat)" if penalty_value is not None else ""
-            message = f"{course_name} kursidagi \"{db_lesson.topic}\" lesson davomat holati yangilandi{penalty_text}."
+            grade_value = grade_by_student.get(student_id)
+            grade_text = f" Baho: {grade_value}." if grade_value is not None else ""
+            message = f"{course_name} kursidagi \"{db_lesson.topic}\" lesson davomat holati yangilandi{penalty_text}.{grade_text}"
             db_notification = models.Notification(
                 user_id=student_id,
                 title=notification_title,
@@ -1260,6 +1464,16 @@ def save_lesson_attendance(lesson_id: int, payload: schemas.LessonAttendanceSave
         )
 
         student = student_by_id.get(db_notification.user_id)
+        if student:
+            telegram_message = (
+                f" Davomat/Baho yangilandi\n"
+                f" Kurs: {course_name}\n"
+                f" Mavzu: {db_lesson.topic}\n"
+                f" Sana: {lesson_date}\n"
+                f"? {db_notification.message}"
+            )
+            send_telegram_to_student(student, telegram_message)
+
         if student and not notification_manager.is_online(db_notification.user_id):
             send_sms_via_webhook(student.phone, f"{student.name}, {db_notification.message}")
 
@@ -1351,8 +1565,49 @@ def read_performance(db: Session = Depends(get_db)): return db.query(models.Perf
 def create_performance(p: schemas.PerformanceCreate, db: Session = Depends(get_db)):
     db_p = models.Performance(**p.model_dump())
     db.add(db_p)
+
+    student = db.query(models.Student).filter(models.Student.id == p.student_id).first()
+    course = db.query(models.Course).filter(models.Course.id == p.course_id).first()
+    course_name = course.name if course else f"Kurs #{p.course_id}"
+
+    sync_notification_id_sequence(db)
+    db_notification = models.Notification(
+        user_id=p.student_id,
+        title=" O'zlashtirish yangilandi",
+        message=f"{course_name} kursida {p.label}: {p.score}",
+        type="performance_updated",
+    )
+    db.add(db_notification)
+
     db.commit()
     db.refresh(db_p)
+    db.refresh(db_notification)
+
+    event_payload = {
+        "performance_id": db_p.id,
+        "student_id": p.student_id,
+        "course_id": p.course_id,
+        "score": p.score,
+        "label": p.label,
+        "type": p.type,
+    }
+    emit_role_events("teacher", "performance.created", event_payload)
+    emit_role_events("admin", "performance.created", event_payload)
+    emit_role_events("student", "performance.created", event_payload, user_id=p.student_id)
+
+    push_notification_realtime(p.student_id, notification_to_payload(db_notification))
+
+    if student:
+        send_telegram_to_student(
+            student,
+            (
+                f" O'zlashtirish yangilandi\n"
+                f" Kurs: {course_name}\n"
+                f" Ko'rsatkich: {p.label}\n"
+                f" Natija: {p.score}"
+            ),
+        )
+
     return db_p
 
 # Payment
@@ -1451,12 +1706,14 @@ def create_payment(payment: schemas.PaymentCreate, db: Session = Depends(get_db)
             setattr(existing, key, value)
         db.commit()
         db.refresh(existing)
+        push_payment_telegram_message(db, existing)
         return existing
     
     db_payment = models.Payment(**payment.model_dump())
     db.add(db_payment)
     db.commit()
     db.refresh(db_payment)
+    push_payment_telegram_message(db, db_payment)
     return db_payment
 
 @app.put("/payments/{payment_id}", response_model=schemas.Payment)
@@ -1489,6 +1746,8 @@ def update_payment(payment_id: int, payment: schemas.PaymentUpdate, db: Session 
         "payment.updated",
         {"payment_id": db_payment.id, "status": db_payment.status, "course_id": db_payment.course_id},
     )
+
+    push_payment_telegram_message(db, db_payment)
 
     return db_payment
 
@@ -1543,6 +1802,16 @@ async def send_payment_sms(payment_id: int, db: Session = Depends(get_db)):
         {"payment_id": payment.id, "student_id": student.id, "course_id": payment.course_id},
     )
 
+    send_telegram_to_student(
+        student,
+        (
+            f" To'lov eslatmasi\n"
+            f" Kurs: {course_name}\n"
+            f" Miqdor: {payment.amount} {payment.currency or 'USD'}\n"
+            f"? {db_notification.message}"
+        ),
+    )
+
     return {"message": "Notification sent", "student_name": student.name}
 
 @app.post("/payments/send-bulk-notification")
@@ -1590,6 +1859,16 @@ async def send_bulk_payment_notification(payload: dict, db: Session = Depends(ge
             else:
                 message = f"{course_name} kursi uchun to'lov statusini tekshiring."
             
+            send_telegram_to_student(
+                student,
+                (
+                    f" To'lov xabari\n"
+                    f" Kurs: {course_name}\n"
+                    f" Miqdor: {payment.amount} {payment.currency or 'USD'}\n"
+                    f"? {message}"
+                ),
+            )
+
             # Create notification
             sync_notification_id_sequence(db)
             db_notification = models.Notification(
@@ -2085,6 +2364,8 @@ async def payme_webhook(
             "payment.updated",
             {"payment_id": payment.id, "status": "paid", "course_id": payment.course_id},
         )
+
+        push_payment_telegram_message(db, payment, student=student)
 
     db.commit()
 

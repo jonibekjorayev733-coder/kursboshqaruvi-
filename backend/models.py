@@ -35,6 +35,8 @@ class Student(Base):
     avatar = Column(String, nullable=True)
     phone = Column(String, nullable=True)
     telegram = Column(String, nullable=True)
+    telegram_chat_id = Column(String, nullable=True, index=True)
+    telegram_linked_at = Column(DateTime, nullable=True)
     
     # Relationships
     courses = relationship("CourseEnrollment", back_populates="student")
@@ -160,6 +162,21 @@ class Assignment(Base):
     teacher = relationship("Teacher", back_populates="assignments", foreign_keys=[teacher_id])
     student = relationship("Student", back_populates="assignments", foreign_keys=[student_id])
 
+
+
+
+class TelegramLinkToken(Base):
+    __tablename__ = "telegram_link_token"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("student.id"), nullable=False, index=True)
+    phone = Column(String, nullable=False, index=True)
+    token = Column(String, nullable=False, unique=True, index=True)
+    is_used = Column(Boolean, default=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    chat_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class AssignmentProgress(Base):
     __tablename__ = "assignment_progress"

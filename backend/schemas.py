@@ -45,6 +45,8 @@ class StudentBase(BaseModel):
     avatar: Optional[str] = None
     phone: Optional[str] = None
     telegram: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    telegram_linked_at: Optional[datetime] = None
 
 class StudentCreate(BaseModel):
     name: str
@@ -61,6 +63,19 @@ class Student(StudentBase):
 class StudentPasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str
+
+class TelegramLinkRequest(BaseModel):
+    phone: str
+
+
+class TelegramLinkResponse(BaseModel):
+    student_id: int
+    student_name: str
+    phone: str
+    deep_link: str
+    qr_payload: str
+    expires_at: datetime
+
 
 class CourseBase(BaseModel):
     name: str

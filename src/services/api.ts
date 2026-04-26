@@ -901,6 +901,27 @@ export const api = {
         return response.json();
     },
 
+    // Telegram bot linking
+    async requestTelegramLink(phone: string): Promise<{
+        student_id: number;
+        student_name: string;
+        phone: string;
+        deep_link: string;
+        qr_payload: string;
+        expires_at: string;
+    }> {
+        const response = await fetch(`${API_URL}/telegram/link/request`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone }),
+        });
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body?.detail || 'Telegram link so\'rov amalga oshmadi');
+        }
+        return response.json();
+    },
+
     async verifyToken(token: string): Promise<any> {
         const response = await fetch(`${API_URL}/auth/verify`, {
             method: 'POST',

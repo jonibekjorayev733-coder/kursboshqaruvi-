@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { api, Student } from '@/services/api';
-import { Search, Plus, Trash2, Edit, Users, Phone, MessageSquare } from 'lucide-react';
+import { Search, Plus, Trash2, Edit, Users, Phone, MessageSquare, Send, Copy, ExternalLink, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '@/components/shared/ConfirmModal';
 
@@ -22,6 +22,8 @@ export default function AdminStudents() {
     telegram: ''
   });
   const [confirmModal, setConfirmModal] = useState<{ open: boolean; type: 'delete' | 'edit'; id?: number; name?: string; student?: Student }>({ open: false, type: 'delete' });
+  const [telegramModal, setTelegramModal] = useState<{ open: boolean; studentName?: string; deepLink?: string; expiresAt?: string } | null>(null);
+  const [telegramLoading, setTelegramLoading] = useState<number | null>(null);
 
   useEffect(() => {
     fetchStudents();
@@ -120,6 +122,28 @@ export default function AdminStudents() {
       await fetchStudents();
     } catch (error) {
       toast.error('Xatolik yuz berdi');
+    }
+  };
+
+  const handleTelegramLink = async (student: Student) => {
+    const phone = student.phone;
+    if (!phone) {
+      toast.error('Bu o\'quvchining telefon raqami yo\'q');
+      return;
+    }
+    setTelegramLoading(student.id as number);
+    try {
+      const result = await api.requestTelegramLink(phone);
+      setTelegramModal({
+        open: true,
+        studentName: result.student_name,
+        deepLink: result.deep_link,
+        expiresAt: result.expires_at,
+      });
+    } catch (error: any) {
+      toast.error(`Telegram havola yaratishda xatolik: ${error.message}`);
+    } finally {
+      setTelegramLoading(null);
     }
   };
 
@@ -263,25 +287,39 @@ export default function AdminStudents() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-2 pt-4 border-t border-slate-700/50">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => handleEdit(student)}
-                  className="flex-1 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 font-black text-xs uppercase transition-colors flex items-center justify-center gap-1"
-                >
-                  <Edit className="w-3 h-3" />
-                  O'zgartirish
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setConfirmModal({ open: true, type: 'delete', id: student.id as number, name: student.name })}
-                  className="flex-1 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black text-xs uppercase transition-colors flex items-center justify-center gap-1"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  O'chirish
-                </motion.button>
+              <div className="space-y-2 pt-4 border-t border-slate-700/50">
+                <div className="flex gap-2">
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => handleEdit(student)}
+                    className="flex-1 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 font-black text-xs uppercase transition-colors flex items-center justify-center gap-1"
+                  >
+                    <Edit className="w-3 h-3" />
+                    O'zgartirish
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setConfirmModal({ open: true, type: 'delete', id: student.id as number, name: student.name })}
+                    className="flex-1 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black text-xs uppercase transition-colors flex items-center justify-center gap-1"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    O'chirish
+                  </motion.button>
+                </div>
+                {student.phone && (
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => handleTelegramLink(student)}
+                    disabled={telegramLoading === student.id}
+                    className="w-full py-2 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 font-black text-xs uppercase transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
+                  >
+                    <Send className="w-3 h-3" />
+                    {telegramLoading === student.id ? 'Yuklanmoqda...' : 'Telegram Havola'}
+                  </motion.button>
+                )}
               </div>
             </motion.div>
           ))}
@@ -387,6 +425,76 @@ export default function AdminStudents() {
               >
                 {editingId ? 'O\'zgartirish' : 'Qo\'shish'}
               </motion.button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* TELEGRAM LINK MODAL */}
+      {telegramModal?.open && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setTelegramModal(null)}
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            onClick={e => e.stopPropagation()}
+            className="bg-gradient-to-br from-slate-800 to-slate-900 border border-blue-500/40 rounded-2xl p-6 w-full max-w-md shadow-2xl"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Send className="w-5 h-5 text-blue-400" />
+                <h3 className="text-white font-black text-lg">Telegram Havola</h3>
+              </div>
+              <button onClick={() => setTelegramModal(null)} className="text-slate-400 hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-3 rounded-xl bg-slate-700/50 border border-slate-600/50">
+                <p className="text-slate-400 text-xs mb-1">O'quvchi</p>
+                <p className="text-white font-black">{telegramModal.studentName}</p>
+              </div>
+
+              <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/30">
+                <p className="text-blue-300 text-xs font-black mb-2">TELEGRAM HAVOLA</p>
+                <p className="text-slate-300 text-xs break-all font-mono mb-3">{telegramModal.deepLink}</p>
+                <div className="flex gap-2">
+                  <a
+                    href={telegramModal.deepLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 font-black text-xs uppercase transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    Ochish
+                  </a>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(telegramModal.deepLink || '');
+                      toast.success('Havola nusxalandi!');
+                    }}
+                    className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg bg-slate-600/50 hover:bg-slate-600/70 text-slate-300 font-black text-xs uppercase transition-colors"
+                  >
+                    <Copy className="w-3 h-3" />
+                    Nusxa
+                  </button>
+                </div>
+              </div>
+
+              {telegramModal.expiresAt && (
+                <p className="text-slate-500 text-xs text-center">
+                  Amal qilish muddati: {new Date(telegramModal.expiresAt).toLocaleTimeString('uz-UZ')}
+                </p>
+              )}
+
+              <p className="text-slate-400 text-xs text-center bg-slate-700/30 rounded-lg p-3">
+                Bu havolani o'quvchiga yuboring. O'quvchi havolaga bosib Telegram botni ulaydi va endi barcha bildirishnomalar botga keladi.
+              </p>
             </div>
           </motion.div>
         </motion.div>
