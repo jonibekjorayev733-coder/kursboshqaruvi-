@@ -39,6 +39,7 @@ app = FastAPI(title="EduGrow Platform API")
 
 redis_client = None
 REDIS_DEFAULT_TTL_SECONDS = int(os.getenv("REDIS_CACHE_TTL", "60"))
+telegram_bot_username_cache = ""
 
 
 def init_redis_client():
@@ -287,7 +288,35 @@ def get_telegram_bot_token() -> str:
 
 
 def get_telegram_bot_username() -> str:
-    return os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
+    global telegram_bot_username_cache
+
+    configured = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
+    if configured:
+        telegram_bot_username_cache = configured
+        return configured
+
+    if telegram_bot_username_cache:
+        return telegram_bot_username_cache
+
+    token = get_telegram_bot_token()
+    if not token:
+        return ""
+
+    url = f"https://api.telegram.org/bot{token}/getMe"
+    request = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            if not (200 <= response.status < 300):
+                return ""
+            payload = json.loads(response.read().decode("utf-8"))
+            username = str(payload.get("result", {}).get("username", "")).strip().lstrip("@")
+            if username:
+                telegram_bot_username_cache = username
+                return username
+    except Exception as exc:
+        print(f"[WARNING] Telegram bot username resolve failed: {exc}")
+
+    return ""
 
 
 def build_telegram_deep_link(start_token: str) -> str:
@@ -400,10 +429,6 @@ def request_telegram_link(payload: schemas.TelegramLinkRequest, db: Session = De
     student = find_student_by_phone(db, payload.phone)
     if not student:
         raise HTTPException(status_code=404, detail="Bu telefon raqamga bog'langan o'quvchi topilmadi")
-
-    bot_username = get_telegram_bot_username()
-    if not bot_username:
-        raise HTTPException(status_code=500, detail="TELEGRAM_BOT_USERNAME sozlanmagan")
 
     expires_at = datetime.utcnow() + timedelta(minutes=15)
     start_token = uuid.uuid4().hex
