@@ -434,6 +434,9 @@ export const api = {
             }
             throw new Error(errorMessage);
         }
+        clearApiCache('enrollments');
+        clearApiCache('courses');
+        studentEnrollmentsCache.delete(studentId);
         return response.json();
     },
 
@@ -442,6 +445,9 @@ export const api = {
             method: 'DELETE',
         });
         if (!response.ok) throw new Error('Failed to delete enrollment');
+        clearApiCache('enrollments');
+        clearApiCache('courses');
+        studentEnrollmentsCache.delete(studentId);
     },
 
     async getEnrollments(courseId: number): Promise<any[]> {
@@ -489,6 +495,8 @@ export const api = {
             body: JSON.stringify(teacher),
         });
         if (!response.ok) throw new Error('Failed to create teacher');
+        clearApiCache('teachers');
+        clearApiCache('courses');
         return response.json();
     },
 
@@ -499,6 +507,8 @@ export const api = {
             body: JSON.stringify(teacher),
         });
         if (!response.ok) throw new Error('Failed to update teacher');
+        clearApiCache('teachers');
+        clearApiCache('courses');
         return response.json();
     },
 
@@ -507,6 +517,8 @@ export const api = {
             method: 'DELETE',
         });
         if (!response.ok) throw new Error('Failed to delete teacher');
+        clearApiCache('teachers');
+        clearApiCache('courses');
     },
 
     // Students

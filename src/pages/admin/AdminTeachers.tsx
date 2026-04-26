@@ -46,6 +46,18 @@ export default function AdminTeachers() {
     }
   };
 
+  const linkTeacherToCourse = async (teacherId: number, teacherName: string, courseId?: number) => {
+    if (!courseId) return;
+    const targetCourse = courses.find((course) => course.id === courseId);
+    if (!targetCourse) return;
+
+    await api.updateCourse(courseId, {
+      ...targetCourse,
+      teacher_id: teacherId,
+      instructor: teacherName,
+    });
+  };
+
   const handleCreate = async () => {
     if (!newTeacher.name || !newTeacher.email || (!editingId && !newTeacher.password) || !newTeacher.course_id) {
       toast.error('Majburiy maydonlarni to\'ldiring');
@@ -53,10 +65,12 @@ export default function AdminTeachers() {
     }
     try {
       if (editingId) {
-        await api.updateTeacher(editingId, newTeacher);
+        const updatedTeacher = await api.updateTeacher(editingId, newTeacher);
+        await linkTeacherToCourse(updatedTeacher.id as number, updatedTeacher.name, newTeacher.course_id);
         toast.success(`O'qituvchi o'zgartirildi: "${newTeacher.name}"`);
       } else {
-        await api.createTeacher(newTeacher);
+        const createdTeacher = await api.createTeacher(newTeacher);
+        await linkTeacherToCourse(createdTeacher.id as number, createdTeacher.name, newTeacher.course_id);
         toast.success(`O'qituvchi qo'shildi: "${newTeacher.name}"`);
       }
     } catch (error: any) {
@@ -72,6 +86,7 @@ export default function AdminTeachers() {
     
     // Refresh list
     await fetchTeachers();
+    await fetchCourses();
   };
 
   const handleDelete = async (id: number) => {
@@ -90,13 +105,14 @@ export default function AdminTeachers() {
   };
 
   const doEdit = (teacher: Teacher) => {
+    const assignedCourse = courses.find((course) => course.teacher_id === teacher.id);
     setNewTeacher({
       name: teacher.name,
       email: teacher.email,
       password: '',
       avatar: teacher.avatar || '',
       subject: teacher.subject || '',
-      course_id: teacher.course_id
+      course_id: assignedCourse?.id
     });
     setEditingId(teacher.id || null);
     setShowModal(true);
@@ -104,7 +120,16 @@ export default function AdminTeachers() {
 
   if (loading) return <div className="text-center py-20 text-slate-400">Yuklanmoqda...</div>;
 
-  const courseMap = new Map(courses.map(c => [c.id, c.name]));
+  const teacherCourseMap = new Map<number, string[]>(
+    teachers
+      .filter((teacher) => teacher.id !== undefined)
+      .map((teacher) => [
+        teacher.id as number,
+        courses
+          .filter((course) => course.teacher_id === teacher.id)
+          .map((course) => course.name),
+      ])
+  );
 
   return (
     <motion.div initial="hidden" animate="visible" variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } }} className="space-y-8">
@@ -174,7 +199,9 @@ export default function AdminTeachers() {
                 <div className="flex items-center gap-2 text-sm">
                   <BookOpen className="w-4 h-4 text-cyan-400" />
                   <span className="text-cyan-300 font-black">
-                    {courseMap.get(teacher.course_id!) || 'Kurs tanlanmagan'}
+                    {(teacherCourseMap.get(teacher.id as number) || []).length > 0
+                      ? (teacherCourseMap.get(teacher.id as number) || []).join(', ')
+                      : 'Kurs tanlanmagan'}
                   </span>
                 </div>
               </div>

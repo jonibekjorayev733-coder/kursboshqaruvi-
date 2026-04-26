@@ -5,6 +5,7 @@ from sqlalchemy import text, func, and_, or_
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from typing import List, Optional, Dict, Set
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 import asyncio
 import calendar
 import os
@@ -1777,9 +1778,17 @@ def create_lesson(lesson: schemas.LessonCreate, db: Session = Depends(get_db)):
 
     scheduled_at = lesson.lesson_datetime
     if scheduled_at is not None:
-        if scheduled_at.tzinfo is not None:
+        tashkent_tz = ZoneInfo("Asia/Tashkent")
+        today_local = datetime.now(tashkent_tz).date()
+
+        if scheduled_at.tzinfo is None:
+            scheduled_local_date = scheduled_at.date()
+            scheduled_at = scheduled_at.replace(tzinfo=tashkent_tz).astimezone(timezone.utc).replace(tzinfo=None)
+        else:
+            scheduled_local_date = scheduled_at.astimezone(tashkent_tz).date()
             scheduled_at = scheduled_at.astimezone(timezone.utc).replace(tzinfo=None)
-        if scheduled_at.date() != datetime.utcnow().date():
+
+        if scheduled_local_date != today_local:
             raise HTTPException(status_code=400, detail="Lesson faqat bugungi sana uchun yaratilishi mumkin")
 
     sync_table_id_sequence(db, "lesson")

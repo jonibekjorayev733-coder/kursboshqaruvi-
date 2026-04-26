@@ -342,6 +342,7 @@ export default function TeacherAttendance() {
         topic,
         lesson_datetime: lessonDateTime,
       });
+      console.log('✅ Lesson created:', createdLesson);
       setLessonTopic('');
       setLessonDateTime(toLocalDatetimeInputValue(new Date()));
       setSelectedMonthKey(monthKeyFromDate(createdLesson.created_at) || currentMonthKey);
@@ -349,6 +350,13 @@ export default function TeacherAttendance() {
       await loadLessons(selectedCourse.id as number, createdLesson.id);
       toast.success('Lesson yaratildi. Endi davomat olishingiz mumkin.');
     } catch (error: any) {
+      console.error('❌ Lesson creation error:', {
+        message: error?.message,
+        course_id: selectedCourse?.id,
+        topic,
+        lessonDateTime,
+        fullError: error
+      });
       toast.error(error?.message || 'Lesson yaratilmadi');
     } finally {
       setCreatingLesson(false);
@@ -447,10 +455,16 @@ export default function TeacherAttendance() {
               }}
               className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base font-bold text-white outline-none transition focus:border-cyan-500/60"
             >
+              {courses.length === 0 && (
+                <option value="">Kurs topilmadi</option>
+              )}
               {courses.map((course) => (
                 <option key={course.id} value={course.id}>{course.name}</option>
               ))}
             </select>
+            {courses.length === 0 && (
+              <p className="mt-2 text-xs text-amber-400">Sizga kurs biriktirilmagan. Admin kursga teacher tayinlasin.</p>
+            )}
           </div>
         </div>
 
