@@ -764,10 +764,15 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
         ).order_by(models.TelegramLinkToken.created_at.desc()).first()
 
         if not pending_token or pending_token.expires_at < datetime.utcnow():
-            return send_telegram_message(
+            if pending_token and not pending_token.is_used:
+                pending_token.is_used = True
+                pending_token.used_at = datetime.utcnow()
+                db.commit()
+            send_telegram_message(
                 chat_id,
-                "Bog'lash tokeni topilmadi yoki eskirgan. Iltimos, ilovadan yangi Telegram havola oling."
-            ) or {"ok": True}
+                "Bog'lash tokeni topilmadi yoki eskirgan. Iltimos, ilovadan yangi Telegram havola oling.",
+            )
+            return {"ok": True}
 
         contact_user_id = contact.get("user_id")
         from_user_id = from_user.get("id")
@@ -853,7 +858,6 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
         return {"ok": True}
 
     if token_row.is_used:
-        send_telegram_message(chat_id, "Bu havola allaqachon ishlatilgan. Yangi havola oling.")
         return {"ok": True}
 
     if token_row.expires_at < datetime.utcnow():
@@ -1600,10 +1604,66 @@ def update_student(student_id: int, student: schemas.StudentCreate, db: Session 
 @app.delete("/students/{student_id}")
 def delete_student(student_id: int, db: Session = Depends(get_db)):
     db_student = db.query(models.Student).filter(models.Student.id == student_id).first()
-    if db_student is None: raise HTTPException(status_code=404)
+    if db_student is None:
+        raise HTTPException(status_code=404, detail="Student not found")
+
     payload = {"student_id": db_student.id, "name": db_student.name}
-    db.delete(db_student)
-    db.commit()
+
+    try:
+        assignment_ids = [
+            row[0] for row in db.query(models.Assignment.id).filter(models.Assignment.student_id == student_id).all()
+        ]
+
+        if assignment_ids:
+            db.query(models.Notification).filter(
+                models.Notification.assignment_id.in_(assignment_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(models.AssignmentProgress).filter(
+                models.AssignmentProgress.assignment_id.in_(assignment_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(models.Assignment).filter(
+                models.Assignment.id.in_(assignment_ids)
+            ).delete(synchronize_session=False)
+
+        db.query(models.AssignmentProgress).filter(
+            models.AssignmentProgress.student_id == student_id
+        ).delete(synchronize_session=False)
+
+        db.query(models.Notification).filter(
+            models.Notification.user_id == student_id
+        ).delete(synchronize_session=False)
+
+        db.query(models.Payment).filter(
+            models.Payment.student_id == student_id
+        ).delete(synchronize_session=False)
+
+        db.query(models.CourseEnrollment).filter(
+            models.CourseEnrollment.student_id == student_id
+        ).delete(synchronize_session=False)
+
+        db.query(models.Attendance).filter(
+            models.Attendance.student_id == student_id
+        ).delete(synchronize_session=False)
+
+        db.query(models.Performance).filter(
+            models.Performance.student_id == student_id
+        ).delete(synchronize_session=False)
+
+        db.query(models.TelegramLinkToken).filter(
+            models.TelegramLinkToken.student_id == student_id
+        ).delete(synchronize_session=False)
+
+        db.delete(db_student)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Student cannot be deleted: {str(exc.orig)}")
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Student deletion failed: {str(exc)}")
+
     invalidate_reference_caches()
     emit_role_events("admin", "student.deleted", payload)
     emit_role_events("student", "student.deleted", payload, user_id=payload["student_id"])
@@ -2801,6 +2861,10 @@ async def create_notification(notification: schemas.NotificationCreate, db: Sess
     if not notification_manager.is_online(db_n.user_id):
         student = db.query(models.Student).filter(models.Student.id == db_n.user_id).first()
         send_sms_via_webhook(student.phone if student else None, db_n.message)
+
+    student = db.query(models.Student).filter(models.Student.id == db_n.user_id).first()
+    if student:
+        send_telegram_to_student(student, f"{db_n.title}\n{db_n.message}")
 
     emit_role_events(
         "student",
